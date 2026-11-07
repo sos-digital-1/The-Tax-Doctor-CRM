@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Tax Doctor Team</string>
+    <string name="title_activity_main">Tax Doctor Team</string>
+    <string name="package_name">com.taxdoctor.team</string>
+    <string name="custom_url_scheme">com.taxdoctor.team</string>
+</resources>

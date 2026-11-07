@@ -1,0 +1,113 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src file: data:" />
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #f4f5f8; font: 14px "Segoe UI", system-ui, sans-serif; color: #15161a; }
+  .page { min-height: 100%; display: flex; flex-direction: column; align-items: center; padding: 9vh 24px 24px; }
+  .logo { background: #fff; border: 1px solid #e4e6ea; border-radius: 16px; padding: 14px 26px; box-shadow: 0 4px 24px rgba(16,24,40,.06); }
+  .logo img { height: 44px; display: block; }
+  .tag { color: #667085; margin: 14px 0 26px; }
+  .box { position: relative; width: min(680px, 100%); }
+  .search { width: 100%; padding: 15px 20px 15px 50px; border-radius: 999px; border: 1px solid #d7dae0; background: #fff; font: inherit; font-size: 16px; outline: none; box-shadow: 0 2px 10px rgba(16,24,40,.06); }
+  .search:focus { border-color: #e11d2e; box-shadow: 0 0 0 4px #fdeaec; }
+  .mag { position: absolute; left: 19px; top: 15px; color: #8a8f9b; }
+  .results { position: absolute; top: 58px; left: 0; right: 0; background: #fff; border: 1px solid #e4e6ea; border-radius: 16px; box-shadow: 0 16px 40px rgba(16,24,40,.14); overflow: hidden; z-index: 5; display: none; }
+  .results.on { display: block; }
+  .grp { padding: 9px 18px 4px; font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; color: #8a8f9b; }
+  .item { padding: 9px 18px; cursor: pointer; display: flex; align-items: center; gap: 12px; }
+  .item:hover, .item.sel { background: #f4f5f8; }
+  .item b { font-weight: 600; }
+  .item small { color: #667085; display: block; }
+  .ico { width: 34px; height: 34px; border-radius: 10px; background: #fdeaec; color: #e11d2e; display: grid; place-items: center; font-weight: 800; flex-shrink: 0; }
+  .none { padding: 18px; color: #667085; text-align: center; }
+  h3 { width: min(820px, 100%); margin: 38px 0 12px; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: #8a8f9b; }
+  .tiles { width: min(820px, 100%); display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .tile { background: #fff; border: 1px solid #e4e6ea; border-radius: 14px; padding: 14px; cursor: pointer; display: flex; flex-direction: column; gap: 8px; transition: transform .1s, box-shadow .1s; }
+  .tile:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(16,24,40,.09); }
+  .tile .ico { width: 36px; height: 36px; }
+  .tile b { font-weight: 600; }
+  .recent { width: min(820px, 100%); display: flex; flex-wrap: wrap; gap: 10px; }
+  .chip { background: #fff; border: 1px solid #e4e6ea; border-radius: 999px; padding: 8px 16px; cursor: pointer; }
+  .chip:hover { border-color: #e11d2e; color: #e11d2e; }
+  .foot { margin-top: auto; padding-top: 30px; display: flex; flex-direction: column; align-items: center; gap: 6px; color: #8a8f9b; font-size: 12px; }
+  .eng { display: inline-flex; align-items: center; gap: 8px; }
+  .eng img { height: 40px; }
+  .hint { color: #667085; font-size: 12px; margin-top: 10px; }
+  .login { color: #e11d2e; cursor: pointer; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="logo"><img src="assets/taxdoctor.png" alt="The Tax Doctor" /></div>
+  <div class="tag">Search a customer, ticket, phone number or GSTIN - each result opens right here, so you can keep other customers open in their own tabs.</div>
+  <div class="box">
+    <span class="mag">🔍</span>
+    <input id="q" class="search" placeholder="Search customers, tickets (TD-0012), phone, GSTIN, PAN..." autofocus autocomplete="off" />
+    <div id="res" class="results"></div>
+  </div>
+  <div class="hint">Tip: Ctrl+T new tab · Ctrl+W close · right-click a tab for more · drag tabs to reorder</div>
+
+  <h3 id="rh" style="display:none">Recent customers</h3>
+  <div id="recent" class="recent"></div>
+  <h3>Open a module</h3>
+  <div id="tiles" class="tiles"></div>
+
+  <div class="foot">
+    <div class="eng">Built by <img src="assets/smack.png" alt="Smack Online Services OPC Pvt Ltd" /></div>
+  </div>
+</div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const q = $("q"), res = $("res");
+  const icons = { "Dashboard": "▦", "Customers": "👥", "Tickets": "🎫", "Recurring": "↻", "Annual & renewals": "📅", "One-time": "⚡", "Review inbox": "📥", "Calendar": "🗓", "Billing": "₹", "Team chat": "💬", "Reports": "📊" };
+  let items = [], sel = -1, timer;
+
+  ntp.init().then((i) => {
+    if (!i) return;
+    $("tiles").innerHTML = "";
+    i.modules.forEach(([label, p]) => {
+      const t = document.createElement("div"); t.className = "tile";
+      t.innerHTML = '<div class="ico">' + (icons[label] || "•") + "</div><b></b>"; t.querySelector("b").textContent = label;
+      t.onclick = () => ntp.go(p); $("tiles").appendChild(t);
+    });
+    if (i.recent.length) {
+      $("rh").style.display = "block";
+      i.recent.forEach((r) => { const c = document.createElement("div"); c.className = "chip"; c.textContent = r.title; c.onclick = () => ntp.go(r.path); $("recent").appendChild(c); });
+    }
+  });
+
+  function row(path, icon, title, sub) {
+    const d = document.createElement("div"); d.className = "item";
+    d.innerHTML = '<div class="ico"></div><div><b></b><small></small></div>';
+    d.querySelector(".ico").textContent = icon; d.querySelector("b").textContent = title; d.querySelector("small").textContent = sub || "";
+    d.onclick = () => ntp.go(path); items.push({ d, path }); return d;
+  }
+  function show(r) {
+    res.innerHTML = ""; items = []; sel = -1;
+    if (r.needLogin) { res.innerHTML = '<div class="none">You are signed out. <span class="login" id="lg">Open the sign-in page</span></div>'; $("lg").onclick = () => ntp.go("/"); res.classList.add("on"); return; }
+    if (r.error) { res.innerHTML = '<div class="none">Could not reach the server.</div>'; res.classList.add("on"); return; }
+    if (r.customers.length) { const g = document.createElement("div"); g.className = "grp"; g.textContent = "Customers"; res.appendChild(g); r.customers.forEach((c) => res.appendChild(row("/customers/" + c.id, (c.name[0] || "?").toUpperCase(), c.name, c.phone + (c.gstin ? " · " + c.gstin : "")))); }
+    if (r.tasks.length) { const g = document.createElement("div"); g.className = "grp"; g.textContent = "Tickets"; res.appendChild(g); r.tasks.forEach((t) => res.appendChild(row("/tasks?open=" + t.id, "🎫", t.title, "TD-" + String(t.id).padStart(4, "0") + " · " + (t.customer_name || "Internal")))); }
+    if (!items.length) res.innerHTML = '<div class="none">No matches.</div>';
+    res.classList.add("on");
+  }
+  q.addEventListener("input", () => {
+    clearTimeout(timer);
+    if (q.value.trim().length < 2) { res.classList.remove("on"); return; }
+    timer = setTimeout(async () => show(await ntp.search(q.value.trim())), 140);
+  });
+  q.addEventListener("keydown", (e) => {
+    if (!items.length) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); sel = Math.min(sel + 1, items.length - 1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); sel = Math.max(sel - 1, 0); }
+    else if (e.key === "Enter") { e.preventDefault(); ntp.go(items[Math.max(sel, 0)].path); return; }
+    else return;
+    items.forEach((it, i) => it.d.classList.toggle("sel", i === sel));
+  });
+  document.addEventListener("click", (e) => { if (!e.target.closest(".box")) res.classList.remove("on"); });
+</script>
+</body>
+</html>

@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src file: data:" />
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #0b0b0d; font: 13px "Segoe UI", system-ui, sans-serif; color: #c9ccd4; user-select: none; overflow: hidden; }
+  .btn { background: none; border: 0; color: #c9ccd4; padding: 0 11px; border-radius: 8px; cursor: pointer; font: inherit; height: 32px; display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+  .btn:hover { background: #1c1d21; color: #fff; }
+  .brand { background: #fff; border-radius: 9px; display: grid; place-items: center; padding: 6px 10px; }
+  .brand img { height: 22px; display: block; }
+  .eng { background: #fff; border-radius: 9px; padding: 6px 10px 7px; display: inline-flex; flex-direction: column; gap: 3px; }
+  .eng span { font-size: 8.5px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700; color: #6b7280; }
+  .eng img { height: 36px; display: block; }
+  .title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .x { width: 18px; height: 18px; line-height: 17px; text-align: center; border-radius: 50%; font-size: 15px; flex-shrink: 0; }
+  .x:hover { background: #e11d2e; color: #fff; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #e11d2e; flex-shrink: 0; }
+
+  /* horizontal */
+  body.top .root { height: 100%; display: flex; align-items: flex-end; gap: 3px; padding: 0 8px; border-bottom: 2px solid #e11d2e; }
+  body.top .brand { align-self: center; margin-right: 8px; }
+  body.top .tabs { display: flex; gap: 3px; align-items: flex-end; min-width: 0; flex: 0 1 auto; overflow: hidden; }
+  body.top .tab { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 9px 0 14px; border-radius: 9px 9px 0 0; background: #16171a; color: #9aa0ab; max-width: 230px; min-width: 70px; flex: 1 1 170px; border: 1px solid #25272c; border-bottom: 0; }
+  body.top .tab:hover { background: #1f2024; color: #fff; }
+  body.top .tab.on { background: #fff; color: #111; font-weight: 600; }
+  body.top .tools { margin-left: auto; align-self: center; display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  body.top .side-only { display: none; }
+  body.top .addwrap { align-self: center; display: flex; }
+
+  /* vertical */
+  body.left .root { height: 100%; display: flex; flex-direction: column; padding: 14px 10px 12px; border-right: 2px solid #e11d2e; gap: 10px; }
+  body.left .brand { align-self: stretch; padding: 9px 12px; }
+  body.left .brand img { height: 26px; margin: 0 auto; }
+  body.left .tabs { display: flex; flex-direction: column; gap: 3px; overflow-y: auto; flex: 1; }
+  body.left .tab { display: flex; align-items: center; gap: 9px; min-height: 38px; padding: 0 9px 0 12px; border-radius: 9px; background: transparent; color: #a3a7b3; border-left: 3px solid transparent; }
+  body.left .tab:hover { background: #17181c; color: #fff; }
+  body.left .tab.on { background: #202126; color: #fff; font-weight: 600; border-left-color: #e11d2e; }
+  body.left .addwrap { display: flex; gap: 4px; }
+  body.left .addwrap .btn { flex: 1; justify-content: center; background: #17181c; }
+  body.left .tools { display: flex; flex-direction: column; gap: 2px; border-top: 1px solid #1f2024; padding-top: 10px; }
+  body.left .top-only { display: none; }
+  .tab.drag { opacity: 0.4; }
+  .tab.over { outline: 2px dashed #e11d2e; outline-offset: -2px; }
+  .lock { color: #ff8a93; }
+</style>
+</head>
+<body class="top">
+<div class="root" id="root"></div>
+<script>
+  const root = document.getElementById("root");
+  let dragId = null;
+  function render(s) {
+    document.body.className = s.layout;
+    root.innerHTML = "";
+    const brand = el("div", "brand"); brand.innerHTML = '<img src="assets/taxdoctor.png" alt="The Tax Doctor">'; root.appendChild(brand);
+
+    const tabsBox = el("div", "tabs");
+    s.tabs.forEach((t) => {
+      const d = el("div", "tab" + (t.id === s.active && !s.locked ? " on" : ""));
+      d.draggable = true;
+      d.innerHTML = "<span class='title'></span><span class='x' title='Close tab'>×</span>";
+      d.querySelector(".title").textContent = (t.kind === "newtab" ? "＋ " : "") + (t.title || "Tab");
+      d.title = t.title || "";
+      d.onclick = () => td.activate(t.id);
+      d.onauxclick = (e) => e.button === 1 && td.close(t.id);
+      d.oncontextmenu = (e) => { e.preventDefault(); td.tabMenu(t.id); };
+      d.querySelector(".x").onclick = (e) => { e.stopPropagation(); td.close(t.id); };
+      d.ondragstart = () => { dragId = t.id; d.classList.add("drag"); };
+      d.ondragend = () => { dragId = null; d.classList.remove("drag"); };
+      d.ondragover = (e) => { e.preventDefault(); d.classList.add("over"); };
+      d.ondragleave = () => d.classList.remove("over");
+      d.ondrop = (e) => { e.preventDefault(); d.classList.remove("over"); if (dragId && dragId !== t.id) td.reorder(dragId, t.id); };
+      tabsBox.appendChild(d);
+    });
+    if (s.layout === "top") { const add = el("div", "addwrap"); add.appendChild(btn("＋", () => td.newTab("@newtab"), "New tab (Ctrl+T)")); add.appendChild(btn("▾", () => td.popupModules(), "Open a module in a new tab")); tabsBox.appendChild(add); }
+    root.appendChild(tabsBox);
+
+    if (s.layout === "left") {
+      const add = el("div", "addwrap"); add.appendChild(btn("＋ New tab", () => td.newTab("@newtab"), "New tab (Ctrl+T)")); add.appendChild(btn("▾", () => td.popupModules(), "Open a module in a new tab")); root.appendChild(add);
+    }
+
+    const tools = el("div", "tools");
+    tools.appendChild(btn(s.layout === "left" ? "⇧ Tabs on top" : "◧ Tabs on side", () => td.setLayout(s.layout === "left" ? "top" : "left"), "Move the tab strip"));
+    const lock = btn(s.locked ? "🔒 Locked" : "🔒 Lock now", () => td.lock()); lock.classList.add("lock"); tools.appendChild(lock);
+    tools.appendChild(btn("Server", () => td.changeServer(), "Change server address"));
+    const eng = el("div", "eng"); eng.innerHTML = '<span>Built by</span><img src="assets/smack.png" alt="Smack Online Services OPC Pvt Ltd">';
+    if (s.layout === "left") { eng.style.marginTop = "8px"; }
+    tools.appendChild(eng);
+    root.appendChild(tools);
+  }
+  function el(tag, cls) { const e = document.createElement(tag); e.className = cls; return e; }
+  function btn(label, fn, title) { const b = el("button", "btn"); b.textContent = label; b.onclick = fn; if (title) b.title = title; return b; }
+  td.onTabs(render);
+  render({ tabs: [], active: null, locked: false, layout: "top" });
+</script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0b0d; color: #fff; font: 14px "Segoe UI", system-ui, sans-serif; display: grid; place-items: center; }
+  .box { width: 440px; }
+  h1 { font-size: 24px; margin: 0 0 6px; }
+  p { color: #9aa0ab; margin: 0 0 16px; }
+  input { width: 100%; padding: 11px 12px; border-radius: 8px; border: 1px solid #35373d; background: #17181b; color: #fff; font: inherit; }
+  input:focus { outline: 2px solid #e11d2e; }
+  button { background: #e11d2e; color: #fff; border: 0; border-radius: 8px; padding: 11px 22px; font: inherit; font-weight: 600; cursor: pointer; margin-top: 12px; }
+  .err { color: #ff8a93; margin-top: 10px; min-height: 18px; }
+</style>
+</head>
+<body>
+  <div class="box">
+    <h1>Connect to your Tax Doctor server</h1>
+    <p id="msg">Enter the address your firm uses for the portal, for example https://portal.yourfirm.in</p>
+    <input id="u" placeholder="https://..." value="http://localhost:8787" autofocus />
+    <button id="go">Connect</button>
+    <div class="err" id="err"></div>
+  </div>
+<script>
+  const q = new URLSearchParams(location.search);
+  if (q.get("error")) { document.getElementById("msg").textContent = "Could not reach " + (q.get("server") || "the server") + " (" + q.get("error") + "). Check the address and your connection, then restart the app."; }
+  const go = async () => {
+    const r = await td.saveServer(document.getElementById("u").value.trim());
+    if (r.ok) td.setupDone(); else document.getElementById("err").textContent = r.error;
+  };
+  document.getElementById("go").onclick = go;
+  document.getElementById("u").onkeydown = (e) => e.key === "Enter" && go();
+</script>
+</body>
+</html>

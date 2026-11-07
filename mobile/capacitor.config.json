@@ -1,0 +1,14 @@
+{
+  "appId": "com.taxdoctor.team",
+  "appName": "Tax Doctor Team",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true,
+    "allowNavigation": ["*"]
+  },
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#0b0b0d"
+  }
+}

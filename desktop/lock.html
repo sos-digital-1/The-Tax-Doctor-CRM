@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0b0d; color: #fff; font: 14px "Segoe UI", system-ui, sans-serif; display: grid; place-items: center; }
+  .box { text-align: center; max-width: 380px; }
+  h1 { font-size: 26px; margin: 12px 0 6px; }
+  p { color: #9aa0ab; }
+  button { background: #e11d2e; color: #fff; border: 0; border-radius: 8px; padding: 11px 26px; font: inherit; font-weight: 600; cursor: pointer; margin-top: 10px; }
+  .ico { width: 56px; height: 56px; border-radius: 14px; background: #e11d2e; display: grid; place-items: center; font-size: 30px; margin: 0 auto; }
+</style>
+</head>
+<body>
+  <div class="box">
+    <div class="ico">🔒</div>
+    <h1>Session locked</h1>
+    <p>You were signed out after 15 minutes without activity. Sign in again to continue where you left off.</p>
+    <button onclick="td.unlock()">Sign in again</button>
+  </div>
+</body>
+</html>

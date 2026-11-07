@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0b0b0d" />
+<title>Tax Doctor Team</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: #0b0b0d; color: #fff; font: 15px/1.5 system-ui, "Segoe UI", Roboto, sans-serif; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 28px 22px; }
+  .chip { background: #fff; border-radius: 14px; padding: 12px 22px; margin-bottom: 26px; }
+  .chip img { height: 40px; display: block; }
+  h1 { font-size: 24px; margin: 0 0 6px; letter-spacing: -0.02em; text-align: center; }
+  p { color: #a3a7b3; margin: 0 0 18px; text-align: center; max-width: 340px; }
+  input { width: 100%; max-width: 360px; padding: 14px 16px; border-radius: 12px; border: 1px solid #35373d; background: #17181b; color: #fff; font: inherit; }
+  input:focus { outline: 2px solid #e11d2e; }
+  button { width: 100%; max-width: 360px; margin-top: 12px; background: #e11d2e; color: #fff; border: 0; border-radius: 12px; padding: 14px; font: inherit; font-weight: 700; }
+  .err { color: #ff8a93; min-height: 22px; margin-top: 10px; text-align: center; max-width: 340px; }
+  .eng { margin-top: 36px; background: #fff; border-radius: 12px; padding: 8px 14px 9px; display: flex; flex-direction: column; gap: 4px; align-items: center; text-decoration: none; }
+  .eng span { font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700; color: #6b7280; }
+  .eng img { height: 44px; }
+  .small { font-size: 12px; color: #6e727c; margin-top: 18px; text-align: center; max-width: 320px; }
+</style>
+</head>
+<body>
+  <div class="chip"><img src="taxdoctor.png" alt="The Tax Doctor" /></div>
+  <h1 id="title">Connect to your firm</h1>
+  <p id="sub">Enter the portal address your firm uses. You only do this once on this phone.</p>
+  <input id="url" inputmode="url" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="https://portal.yourfirm.in" />
+  <button id="go">Connect</button>
+  <div class="err" id="err"></div>
+  <div class="small" id="hint">Staff and admin app. Customers do not need it - they only use the link you send them.</div>
+  <div class="eng"><span>Built by</span><img src="smack.png" alt="Smack Online Services OPC Pvt Ltd" /></div>
+<script>
+  const KEY = "td-server";
+  const $ = (id) => document.getElementById(id);
+  const params = new URLSearchParams(location.search);
+  let saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+
+  function normalise(v) {
+    v = (v || "").trim();
+    if (!v) return null;
+    if (!/^https?:\/\//i.test(v)) v = (/^(localhost|10\.|192\.168\.|127\.)/.test(v) ? "http://" : "https://") + v;
+    try {
+      const u = new URL(v);
+      if (u.protocol === "http:" && !/^(localhost|127\.|10\.|192\.168\.)/.test(u.hostname)) return { error: "Use https:// for any address outside your office network." };
+      return { url: u.origin };
+    } catch (e) { return { error: "That does not look like a web address." }; }
+  }
+  async function reachable(url) {
+    try { const r = await fetch(url + "/api/health", { cache: "no-store" }); return r.ok; } catch (e) { return false; }
+  }
+  async function go(raw) {
+    $("err").textContent = "";
+    const n = normalise(raw);
+    if (!n || n.error) { $("err").textContent = (n && n.error) || "Enter the address."; return; }
+    $("go").disabled = true; $("go").textContent = "Connecting...";
+    if (!(await reachable(n.url))) {
+      $("go").disabled = false; $("go").textContent = "Connect";
+      $("err").textContent = "Could not reach " + n.url + ". Check the address and your internet connection.";
+      return;
+    }
+    try { localStorage.setItem(KEY, n.url); } catch (e) {}
+    location.replace(n.url + "/");
+  }
+  $("go").onclick = () => go($("url").value);
+  $("url").onkeydown = (e) => e.key === "Enter" && go($("url").value);
+
+  if (saved && !params.get("change")) {
+    $("title").textContent = "Opening Tax Doctor...";
+    $("sub").textContent = saved;
+    $("url").style.display = "none"; $("go").textContent = "Change server";
+    $("go").onclick = () => { try { localStorage.removeItem(KEY); } catch (e) {} location.search = "?change=1"; };
+    reachable(saved).then((ok) => {
+      if (ok) location.replace(saved + "/");
+      else { $("title").textContent = "Can't reach your firm"; $("err").textContent = "No connection to " + saved + ". Check your internet and try again."; $("go").style.display = "block"; }
+    });
+  } else if (saved) { $("url").value = saved; }
+</script>
+</body>
+</html>

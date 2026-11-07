@@ -1,0 +1,31 @@
+{
+  "name": "tax-doctor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:web": "vite",
+    "build": "vite build",
+    "db:migrate": "wrangler d1 migrations apply tax-doctor-db --local",
+    "db:seed": "node scripts/seed.mjs --local",
+    "db:seed:demo": "node scripts/seed.mjs --local --demo",
+    "start": "npm run build && wrangler dev --port 8787",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "dependencies": {
+    "hono": "^4.13.17",
+    "qrcode-generator": "^2.0.4",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261107.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.2.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.6",
+    "wrangler": "^4.158.0"
+  }
+}

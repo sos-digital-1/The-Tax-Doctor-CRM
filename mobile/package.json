@@ -1,0 +1,1 @@
+{"name":"tax-doctor-mobile","version":"1.0.0","private":true,"description":"Tax Doctor Team - Android app (staff / admin only). Built by Smack Online Services OPC Pvt Ltd.","dependencies":{"@capacitor/android":"^8.6.0","@capacitor/cli":"^8.6.0","@capacitor/core":"^8.6.0"}}

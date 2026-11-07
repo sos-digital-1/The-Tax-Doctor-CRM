@@ -1,0 +1,15 @@
+node_modules
+dist
+.wrangler
+.dev.vars
+.tools
+mobile/android/local.properties
+mobile/*.keystore
+.gradle
+mobile/android/build
+mobile/android/app/build
+mobile/android/capacitor-cordova-android-plugins/build
+mobile/*.apk
+desktop/dist
+.seed.sql
+*.log
