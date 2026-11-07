@@ -31,7 +31,8 @@ export function registerExtra(api: App, o: { PORTAL_COOKIE: string; STAFF_COOKIE
       has(c, "docs.review") ? n("SELECT COUNT(*) n FROM portal_messages WHERE status = 'NEW'") : Promise.resolve(0),
       n("SELECT COUNT(*) n FROM customer_services cs JOIN services s ON s.id = cs.service_id AND s.category = 'ANNUAL' JOIN customers c ON c.id = cs.customer_id AND c.active = 1 WHERE cs.status = 'ACTIVE' AND cs.next_due <= ?", addDays(today, 15)),
     ]);
-    return c.json({ notifications: notif, chat, inbox: docs + msgs, renewals });
+    const latest = (await one<{ m: number }>(c.env.DB, "SELECT COALESCE(MAX(id),0) m FROM notifications WHERE user_id = ?", u.id))!.m;
+    return c.json({ notifications: notif, chat, inbox: docs + msgs, renewals, latest });
   });
 
   // desktop app: "anything new since id X?" - never marks anything as read
@@ -43,6 +44,15 @@ export function registerExtra(api: App, o: { PORTAL_COOKIE: string; STAFF_COOKIE
     const items = await all(c.env.DB, "SELECT id, title, body, link FROM notifications WHERE user_id = ? AND id > ? ORDER BY id LIMIT 20", uid, since);
     return c.json({ items, latest });
   });
+
+  // "Send test notification": reaches every device this person has set up (bell, phone/Chrome push, Windows app)
+  api.post("/notifications/test", async (c) => {
+    const u = c.get("user");
+    await notifyUsers(c.env, [u.id], { title: "Test notification", body: "If you can read this, alerts are working on this device.", link: "/" });
+    const d = (await one<{ n: number }>(c.env.DB, "SELECT COUNT(*) n FROM push_subscriptions WHERE user_id = ?", u.id))!.n;
+    return c.json({ ok: true, push_devices: d });
+  });
+  api.get("/notifications/devices", async (c) => c.json({ push_devices: (await one<{ n: number }>(c.env.DB, "SELECT COUNT(*) n FROM push_subscriptions WHERE user_id = ?", c.get("user").id))!.n }));
 
   api.post("/notifications/read", async (c) => {
     const { id } = await c.req.json().catch(() => ({} as any));

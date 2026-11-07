@@ -73,37 +73,63 @@ function setBadge(n) {
 
 function toast(n) {
   try {
+    if (!Notification.isSupported()) { log("native notifications are not supported on this PC"); return; }
     const t = new Notification({ title: n.title || "Tax Doctor", body: n.body || "", icon: appIcon(), silent: false });
     t.on("click", () => openLink(n.link));
+    t.on("failed", (_e, err) => log("windows refused the notification: " + err));
     t.show();
-  } catch {}
+    log("toast shown: " + (n.title || ""));
+  } catch (e) { log("toast error: " + e.message); }
+}
+
+// ---- background alerts -------------------------------------------------------------------------------------------
+// The site's sign-in cookie is SameSite=Strict, so it is only sent by requests that come from a page on the site itself.
+// A request made directly from the main process has no page, so the cookie was not sent and every check looked "signed out".
+// We therefore run the checks from a hidden page on the site (never shown), which behaves exactly like a normal tab.
+let pollView = null;
+let pollLoaded = null;
+const logFile = () => path.join(app.getPath("userData"), "notify.log");
+function log(msg) {
+  try { fs.appendFileSync(logFile(), `${new Date().toISOString()} ${msg}\n`); if (fs.statSync(logFile()).size > 200000) fs.writeFileSync(logFile(), ""); } catch {}
+}
+function ensurePollView() {
+  if (pollView && !pollView.webContents.isDestroyed()) return pollLoaded;
+  pollView = new WebContentsView({ webPreferences: { partition: PARTITION, sandbox: true, contextIsolation: true, nodeIntegration: false, devTools: false } });
+  pollLoaded = pollView.webContents.loadURL(origin() + "/api/health").catch((e) => { log("poll page failed to load: " + e.message); pollView = null; });
+  return pollLoaded;
+}
+async function fetchJson(urlPath) {
+  await ensurePollView();
+  if (!pollView) return { status: 0, body: null };
+  try {
+    return await pollView.webContents.executeJavaScript(`fetch(${JSON.stringify(urlPath)}, { credentials: "same-origin", cache: "no-store" }).then(async (r) => ({ status: r.status, body: r.ok ? await r.json() : null }))`);
+  } catch (e) {
+    log("poll error: " + e.message);
+    pollView = null;
+    return { status: 0, body: null };
+  }
 }
 
 async function pollNotifications() {
   if (!cfg?.serverUrl || locked) return;
-  try {
-    const r = await session.fromPartition(PARTITION).fetch(origin() + `/api/notifications/poll?since=${lastNotifId}`, { credentials: "include" });
-    if (r.status === 401) { primed = false; lastNotifId = 0; setBadge(0); return; } // signed out - start fresh after the next sign-in
-    if (!r.ok) return;
-    const d = await r.json();
-    if (!primed) { lastNotifId = d.latest || 0; primed = true; return; } // don't replay old alerts on startup
-    if (d.items?.length) {
-      if (d.items.length > 3) toast({ title: `${d.items.length} new updates`, body: "Open Tax Doctor to see them", link: "/" });
-      else d.items.forEach(toast);
-      if (win && !win.isFocused()) { try { win.flashFrame(true); } catch {} }
-      pulse();
-    }
-    if (d.latest > lastNotifId) lastNotifId = d.latest;
-  } catch {}
+  const r = await fetchJson(`/api/notifications/poll?since=${lastNotifId}`);
+  if (r.status === 401) { if (primed) log("signed out - waiting for sign-in"); primed = false; lastNotifId = 0; setBadge(0); return; }
+  if (r.status !== 200 || !r.body) { if (r.status) log("poll http " + r.status); return; }
+  const d = r.body;
+  if (!primed) { lastNotifId = d.latest || 0; primed = true; log(`signed in - watching from notification #${lastNotifId}`); pulse(); return; } // don't replay old alerts on startup
+  if (d.items?.length) {
+    log(`${d.items.length} new notification(s): ${d.items.map((i) => i.title).join(" | ").slice(0, 160)}`);
+    if (d.items.length > 3) toast({ title: `${d.items.length} new updates`, body: "Open Tax Doctor to see them", link: "/" });
+    else d.items.forEach(toast);
+    if (win && !win.isFocused()) { try { win.flashFrame(true); } catch {} }
+    pulse();
+  }
+  if (d.latest > lastNotifId) lastNotifId = d.latest;
 }
 async function pulse() {
   if (!cfg?.serverUrl) return;
-  try {
-    const r = await session.fromPartition(PARTITION).fetch(origin() + "/api/pulse", { credentials: "include" });
-    if (!r.ok) return;
-    const p = await r.json();
-    setBadge((p.notifications || 0) + (p.chat || 0));
-  } catch {}
+  const r = await fetchJson("/api/pulse");
+  if (r.status === 200 && r.body) setBadge((r.body.notifications || 0) + (r.body.chat || 0));
 }
 
 function createTray() {

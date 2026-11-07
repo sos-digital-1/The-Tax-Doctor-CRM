@@ -26,6 +26,23 @@ const Reset = lazy(() => import("./pages/Reset"));
 const AppsPage = lazy(() => import("./pages/AppsPage"));
 const isElectron = /Electron\//.test(navigator.userAgent);
 
+// short two-tone chime for new alerts (browsers allow it once you have clicked anywhere in the app)
+function chime() {
+  try {
+    const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
+    const ctx = new AC();
+    [880, 1175].forEach((f, i) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = "sine"; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, ctx.currentTime + i * 0.14);
+      g.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + i * 0.14 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + i * 0.14 + 0.22);
+      o.connect(g); g.connect(ctx.destination); o.start(ctx.currentTime + i * 0.14); o.stop(ctx.currentTime + i * 0.14 + 0.25);
+    });
+    setTimeout(() => ctx.close(), 800);
+  } catch {}
+}
+
 try {
   const t = localStorage.getItem("td-theme");
   if (t) document.documentElement.dataset.theme = t;
@@ -46,7 +63,11 @@ function Shell({ user, onLogout }: { user: User & { perms: string[] }; onLogout:
   const [installEvt, setInstallEvt] = useState<any>(null);
   const [pushState, setPushState] = useState<"unsupported" | "off" | "on" | "nokey">("off");
   const [pwModal, setPwModal] = useState(false);
-  const [bannerHidden, setBannerHidden] = useState(() => { try { return Date.now() - Number(localStorage.getItem("td-notify-later") || 0) < 3 * 86400000; } catch { return false; } });
+  const [alerts, setAlerts] = useState<{ key: number; title: string; body?: string; link?: string }[]>([]);
+  const [devices, setDevices] = useState<number | null>(null);
+  const lastId = useRef<number | null>(null);
+  const pushRef = useRef("off");
+  const [bannerHidden, setBannerHidden] = useState(() => { try { return Date.now() - Number(localStorage.getItem("td-notify-later") || 0) < 1 * 86400000; } catch { return false; } });
   const loc = useLocation();
   const nav = useNavigate();
   const can = useCallback((p: string) => user.perms.includes(p), [user]);
@@ -56,9 +77,33 @@ function Shell({ user, onLogout }: { user: User & { perms: string[] }; onLogout:
     setTimeout(() => setToastMsg(null), 3500);
   }, []);
 
-  const refreshBadges = useCallback(() => {
-    api("/pulse").then((p) => setBadges({ inbox: p.inbox, renewals: p.renewals, chat: p.chat, notif: p.notifications })).catch(() => {});
+  const showAlert = useCallback((n: { id?: number; title: string; body?: string; link?: string }) => {
+    const key = n.id ?? Date.now() + Math.random();
+    setAlerts((a) => [...a.slice(-3), { key, title: n.title, body: n.body, link: n.link }]);
+    setTimeout(() => setAlerts((a) => a.filter((x) => x.key !== key)), 7000);
+    chime();
+    // tab in the background and no phone/Chrome push on this device: use the browser's own notification
+    if (document.hidden && !isElectron && pushRef.current !== "on" && "Notification" in window && Notification.permission === "granted") {
+      try {
+        const nt = new Notification(n.title, { body: n.body || "", icon: "/icon-192.png", tag: "td-" + key });
+        nt.onclick = () => { window.focus(); if (n.link) window.location.href = n.link; nt.close(); };
+      } catch {}
+    }
   }, []);
+
+  const refreshBadges = useCallback(() => {
+    api("/pulse")
+      .then((p) => {
+        setBadges({ inbox: p.inbox, renewals: p.renewals, chat: p.chat, notif: p.notifications });
+        if (lastId.current === null) lastId.current = p.latest ?? 0;
+        else if ((p.latest ?? 0) > lastId.current) {
+          const since = lastId.current;
+          lastId.current = p.latest;
+          api(`/notifications/poll?since=${since}`).then((r) => (r.items || []).forEach(showAlert)).catch(() => {});
+        }
+      })
+      .catch(() => {});
+  }, [showAlert]);
 
   useEffect(() => {
     api("/users").then(setUsers).catch(() => {});
@@ -114,6 +159,14 @@ function Shell({ user, onLogout }: { user: User & { perms: string[] }; onLogout:
     } else setPushState("unsupported");
     return () => window.removeEventListener("beforeinstallprompt", onPrompt);
   }, []);
+
+  useEffect(() => { pushRef.current = pushState; }, [pushState]);
+  useEffect(() => { if (menu === "notif") api("/notifications/devices").then((d) => setDevices(d.push_devices)).catch(() => {}); }, [menu, pushState]);
+  useEffect(() => {
+    // permission already granted (e.g. in the Android app) but this device never registered -> do it now, no clicks needed
+    if (pushState === "off" && !isElectron && "Notification" in window && Notification.permission === "granted") enablePush();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pushState]);
 
   const enablePush = async () => {
     try {
@@ -230,6 +283,8 @@ function Shell({ user, onLogout }: { user: User & { perms: string[] }; onLogout:
                       </button>
                     ))}
                   </div>
+                  <button className="mi" style={{ borderTop: "1px solid var(--border)", fontWeight: 600 }} onClick={async () => { try { const r = await api("/notifications/test", { method: "POST", body: {} }); toast(isElectron ? "Test sent - the Windows alert should appear within about 10 seconds" : r.push_devices ? `Test sent to ${r.push_devices} device(s)` : "Test sent - no phone/Chrome device has alerts turned on yet"); refreshBadges(); } catch (e: any) { toast(e.message, true); } }}><Icon name="bell" size={16} /> Send a test notification</button>
+                  {devices !== null && !isElectron && <div className="small muted" style={{ padding: "6px 14px" }}>{devices > 0 ? `${devices} device(s) receive alerts for your account` : "No device has alerts turned on yet"}{pushState === "on" ? " · this one is on" : ""}</div>}
                   {pushState === "off" && <button className="mi" style={{ borderTop: "1px solid var(--border)", color: "var(--red)", fontWeight: 600 }} onClick={enablePush}>Enable alerts on this device</button>}
                   {pushState === "on" && <div className="small muted" style={{ padding: "8px 14px", borderTop: "1px solid var(--border)" }}>Alerts are on for this device.</div>}
                   {pushState === "nokey" && <div className="small muted" style={{ padding: "8px 14px", borderTop: "1px solid var(--border)" }}>Phone alerts need push keys configured on the server.</div>}
@@ -284,6 +339,16 @@ function Shell({ user, onLogout }: { user: User & { perms: string[] }; onLogout:
       </div>
       {palette && <Palette onClose={() => setPalette(false)} />}
       {pwModal && <ChangePasswordModal onClose={() => setPwModal(false)} onDone={(m) => toast(m)} />}
+      {alerts.length > 0 && (
+        <div className="ntoasts">
+          {alerts.map((a) => (
+            <button key={a.key} className="ntoast" onClick={() => { setAlerts((x) => x.filter((y) => y.key !== a.key)); if (a.link) nav(a.link); }}>
+              <span className="nt-ic"><Icon name="bell" size={16} /></span>
+              <span className="grow" style={{ minWidth: 0, textAlign: "left" }}><b style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.title}</b>{a.body && <span className="small" style={{ opacity: 0.8 }}>{a.body}</span>}</span>
+            </button>
+          ))}
+        </div>
+      )}
       {toastMsg && <div className={"toast" + (toastMsg.err ? " err" : "")}>{toastMsg.m}</div>}
     </Ctx.Provider>
   );
