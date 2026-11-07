@@ -1,6 +1,6 @@
 {
   "name": "tax-doctor-desktop",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "The Tax Doctor - internal team desktop app (staff only)",
   "main": "main.js",
   "author": "Smack Online Services OPC Pvt Ltd",
@@ -22,7 +22,7 @@
           ]
         }
       ],
-      "icon": "build/icon.png",
+      "icon": "build/icon.ico",
       "signAndEditExecutable": false
     },
     "nsis": {
@@ -33,7 +33,10 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Tax Doctor Team",
       "artifactName": "TaxDoctor-Team-Setup.exe",
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
     },
     "files": [
       "main.js",
@@ -45,14 +48,19 @@
       "setup.html",
       "assets/**",
       "build/icon.png",
+      "build/icon.ico",
+      "build/overlay.png",
       "package.json"
     ],
     "directories": {
       "output": "dist"
-    }
+    },
+    "afterPack": "afterPack.js"
   },
   "devDependencies": {
     "electron": "^45.2.3",
-    "electron-builder": "^26.18.0"
+    "electron-builder": "^26.18.0",
+    "png-to-ico": "^3.0.2",
+    "rcedit": "^5.0.2"
   }
 }

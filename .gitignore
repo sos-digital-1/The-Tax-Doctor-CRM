@@ -15,3 +15,11 @@ desktop/dist
 *.log
 .cloudflare.env
 .prod-secrets.env
+*.keystore
+keystore.properties
+mobile/twa/build
+mobile/twa/.gradle
+mobile/twa/local.properties
+mobile/twa/app/build
+mobile/twa/.gradle
+**/build/intermediates

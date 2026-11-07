@@ -6,6 +6,7 @@ import {
 } from "./lib";
 import { need, has, Vars } from "./guard";
 import { registerExtra } from "./extra";
+import { registerAuth } from "./auth";
 import { generateRecurring, sendRenewalEmail, sendRenewalReminders, nextRenewalDate, dailyJob } from "./jobs";
 
 const app = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -30,92 +31,7 @@ api.use("*", async (c, next) => {
   await next();
 });
 
-api.use("*", async (c, next) => {
-  const path = new URL(c.req.url).pathname;
-  if (path === "/api/auth/login" || path.startsWith("/api/portal/") || path.startsWith("/api/push/") || path.startsWith("/api/dl/") || path === "/api/health") return next();
-  const p = await verifyToken<{ t: string; uid: number }>(getCookie(c, STAFF_COOKIE), c.env.SESSION_SECRET);
-  if (!p || p.t !== "staff") return c.json({ error: "Not signed in" }, 401);
-  const u = await one<StaffUser & { active: number; permissions: string | null }>(c.env.DB, "SELECT id, name, email, role, active, permissions FROM users WHERE id = ?", p.uid);
-  if (!u || !u.active) return c.json({ error: "Account disabled" }, 401);
-  c.set("user", { id: u.id, name: u.name, email: u.email, role: u.role, perms: effectivePerms(u.role, u.permissions) });
-  await next();
-});
-
-api.get("/health", (c) => c.json({ ok: true }));
-
-// ---------------------------------------------------------------- auth
-api.post("/auth/login", async (c) => {
-  const { email, password } = await c.req.json().catch(() => ({} as any));
-  const u = await one<any>(c.env.DB, "SELECT * FROM users WHERE email = ?", str(email).toLowerCase());
-  const now = new Date().toISOString();
-  if (u?.locked_until && u.locked_until > now) return c.json({ error: "Too many attempts. Try again in a few minutes." }, 429);
-  if (!u || !u.active || !(await verifyPassword(str(password), u.password_hash))) {
-    if (u) {
-      const fails = u.failed_attempts + 1;
-      await run(c.env.DB, "UPDATE users SET failed_attempts = ?, locked_until = ? WHERE id = ?", fails >= 5 ? 0 : fails, fails >= 5 ? new Date(Date.now() + 15 * 60000).toISOString() : null, u.id);
-    }
-    return c.json({ error: "Invalid email or password" }, 401);
-  }
-  await run(c.env.DB, "UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = ?", u.id);
-  const token = await signToken({ t: "staff", uid: u.id }, c.env.SESSION_SECRET, 12 * 3600);
-  setCookie(c, STAFF_COOKIE, token, { httpOnly: true, sameSite: "Strict", secure: isSecure(c.req.url), path: "/", maxAge: 12 * 3600 });
-  await logActivity(c.env.DB, u, "login");
-  return c.json({ user: { id: u.id, name: u.name, email: u.email, role: u.role, perms: effectivePerms(u.role, u.permissions) } });
-});
-api.post("/auth/logout", (c) => {
-  deleteCookie(c, STAFF_COOKIE, { path: "/" });
-  return c.json({ ok: true });
-});
-api.get("/auth/me", (c) => c.json({ user: c.get("user") }));
-api.get("/perms", (c) => c.json({ perms: PERMS, roles: ROLE_DEFAULTS }));
-api.post("/auth/password", async (c) => {
-  const { current, next } = await c.req.json();
-  const u = await one<any>(c.env.DB, "SELECT * FROM users WHERE id = ?", c.get("user").id);
-  if (!(await verifyPassword(str(current), u.password_hash))) return c.json({ error: "Current password is wrong" }, 400);
-  if (str(next).length < 8) return c.json({ error: "New password must be at least 8 characters" }, 400);
-  await run(c.env.DB, "UPDATE users SET password_hash = ? WHERE id = ?", await hashPassword(str(next)), u.id);
-  return c.json({ ok: true });
-});
-
-// ---------------------------------------------------------------- users (admin)
-api.get("/users", async (c) => {
-  // everyone needs the list for assignment dropdowns; only id/name/role exposed to non-admins
-  const rows = await all(c.env.DB, "SELECT id, name, email, role, active, permissions FROM users ORDER BY name");
-  if (has(c, "users.manage")) return c.json(rows.map((r: any) => ({ ...r, perms: effectivePerms(r.role, r.permissions) })));
-  return c.json(rows.filter((r: any) => r.active).map((r: any) => ({ id: r.id, name: r.name, role: r.role })));
-});
-api.post("/users", need("users.manage"), async (c) => {
-  const b = await c.req.json();
-  if (!str(b.name) || !str(b.email) || str(b.password).length < 8) return c.json({ error: "Name, email and a password of 8+ characters are required" }, 400);
-  if (!["ADMIN", "MANAGER", "STAFF"].includes(b.role)) return c.json({ error: "Invalid role" }, 400);
-  try {
-    const r = await run(c.env.DB, "INSERT INTO users (name, email, password_hash, role) VALUES (?,?,?,?)", str(b.name), str(b.email).toLowerCase(), await hashPassword(str(b.password)), b.role);
-    await run(c.env.DB, "INSERT OR IGNORE INTO chat_members (channel_id, user_id) VALUES (1, ?)", r.meta.last_row_id);
-    await logActivity(c.env.DB, c.get("user"), "user.create", "user", r.meta.last_row_id as number, str(b.email));
-    return c.json({ id: r.meta.last_row_id });
-  } catch {
-    return c.json({ error: "A user with this email already exists" }, 409);
-  }
-});
-api.patch("/users/:id", need("users.manage"), async (c) => {
-  const id = Number(c.req.param("id"));
-  const b = await c.req.json();
-  const me = c.get("user");
-  if (id === me.id && (b.active === false || (b.role && b.role !== "ADMIN"))) return c.json({ error: "You cannot disable or demote yourself" }, 400);
-  if (b.name) await run(c.env.DB, "UPDATE users SET name = ? WHERE id = ?", str(b.name), id);
-  if (b.role && ["ADMIN", "MANAGER", "STAFF"].includes(b.role)) await run(c.env.DB, "UPDATE users SET role = ? WHERE id = ?", b.role, id);
-  if (b.permissions && typeof b.permissions === "object") {
-    const clean = (a: unknown) => (Array.isArray(a) ? a.filter((k) => PERMS.some((p) => p.key === k)) : []);
-    await run(c.env.DB, "UPDATE users SET permissions = ? WHERE id = ?", JSON.stringify({ grant: clean(b.permissions.grant), deny: clean(b.permissions.deny) }), id);
-  }
-  if (typeof b.active === "boolean") await run(c.env.DB, "UPDATE users SET active = ? WHERE id = ?", b.active ? 1 : 0, id);
-  if (b.password) {
-    if (str(b.password).length < 8) return c.json({ error: "Password must be at least 8 characters" }, 400);
-    await run(c.env.DB, "UPDATE users SET password_hash = ?, failed_attempts = 0, locked_until = NULL WHERE id = ?", await hashPassword(str(b.password)), id);
-  }
-  await logActivity(c.env.DB, me, "user.update", "user", id);
-  return c.json({ ok: true });
-});
+registerAuth(api, { STAFF_COOKIE, isSecure });
 
 // ---------------------------------------------------------------- services catalog
 api.get("/services", async (c) => c.json(await all(c.env.DB, "SELECT * FROM services ORDER BY category, name")));
@@ -180,7 +96,7 @@ api.get("/customers/:id", need("customers.view"), async (c) => {
   const [services, tasks, documents, requests, link, emails] = await Promise.all([
     all(c.env.DB, `SELECT cs.*, s.name AS service_name, s.category, s.frequency, u.name AS assignee FROM customer_services cs JOIN services s ON s.id = cs.service_id LEFT JOIN users u ON u.id = cs.assigned_to WHERE cs.customer_id = ? ORDER BY s.category, s.name`, id),
     all(c.env.DB, `SELECT t.*, u.name AS assignee FROM tasks t LEFT JOIN users u ON u.id = t.assigned_to WHERE t.customer_id = ? ORDER BY (t.status='DONE'), t.due_date LIMIT 100`, id),
-    all(c.env.DB, `SELECT id, name, size, mime, source, uploaded_at, request_id FROM documents WHERE customer_id = ? AND status = 'ACCEPTED' ORDER BY uploaded_at DESC`, id),
+    all(c.env.DB, `SELECT id, name, original_name, size, mime, source, uploaded_at, request_id FROM documents WHERE customer_id = ? AND status = 'ACCEPTED' ORDER BY uploaded_at DESC`, id),
     all(c.env.DB, `SELECT * FROM doc_requests WHERE customer_id = ? AND status IN ('REQUESTED','SUBMITTED') ORDER BY created_at DESC`, id),
     one(c.env.DB, "SELECT token, last_used_at, locked_until FROM portal_links WHERE customer_id = ? AND active = 1 ORDER BY id DESC", id),
     all(c.env.DB, "SELECT id, subject, kind, status, created_at FROM email_log WHERE customer_id = ? ORDER BY id DESC LIMIT 20", id),
@@ -409,6 +325,15 @@ api.patch("/tasks/:id", async (c) => {
   } else if (reasonChanged) {
     await run(c.env.DB, "INSERT INTO task_comments (task_id, user_id, body) VALUES (?,?,?)", id, user.id, `Hold reason updated: ${holdReason}`);
   }
+  // keep the assignee and the ticket's creator in the loop about every change somebody else makes
+  const changes: string[] = [];
+  if (status !== t.status) changes.push(`status ${t.status.replace("_", " ").toLowerCase()} -> ${status.replace("_", " ").toLowerCase()}`);
+  if ("due_date" in b && nul(b.due_date) !== t.due_date) changes.push(`due date ${nul(b.due_date) ?? "cleared"}`);
+  if (b.priority && ["LOW", "NORMAL", "HIGH", "URGENT"].includes(b.priority) && b.priority !== t.priority) changes.push(`priority ${b.priority.toLowerCase()}`);
+  if (changes.length) {
+    const audience = [t.assigned_to, "assigned_to" in b ? num(b.assigned_to) : null, t.created_by].filter((x): x is number => !!x && x !== user.id);
+    if (audience.length) await notifyUsers(c.env, audience, { title: `${t.title}`, body: `${user.name.replace(/\(.*\)/, "").trim()}: ${changes.join(", ")}`, link: `/tasks?open=${id}` });
+  }
   if ("assigned_to" in b && num(b.assigned_to) !== t.assigned_to) {
     await logActivity(c.env.DB, user, "task.assign", "task", id, String(b.assigned_to));
     if (num(b.assigned_to) && num(b.assigned_to) !== user.id) await notifyUsers(c.env, [num(b.assigned_to)!], { title: `Ticket assigned to you: ${t.title}`, link: "/tasks?assigned=me&open=1" });
@@ -425,7 +350,12 @@ api.delete("/tasks/:id", need("tasks.delete"), async (c) => {
 api.post("/tasks/:id/comments", async (c) => {
   const { body } = await c.req.json();
   if (!str(body)) return c.json({ error: "Comment is empty" }, 400);
-  await run(c.env.DB, "INSERT INTO task_comments (task_id, user_id, body) VALUES (?,?,?)", Number(c.req.param("id")), c.get("user").id, str(body));
+  const id = Number(c.req.param("id"));
+  const me = c.get("user");
+  await run(c.env.DB, "INSERT INTO task_comments (task_id, user_id, body) VALUES (?,?,?)", id, me.id, str(body));
+  const t = await one<any>(c.env.DB, "SELECT title, assigned_to, created_by FROM tasks WHERE id = ?", id);
+  const audience = [t?.assigned_to, t?.created_by].filter((x): x is number => !!x && x !== me.id);
+  if (t && audience.length) await notifyUsers(c.env, audience, { title: `New comment: ${t.title}`, body: `${me.name.replace(/\(.*\)/, "").trim()}: ${str(body).slice(0, 100)}`, link: `/tasks?open=${id}` });
   return c.json({ ok: true });
 });
 
@@ -474,8 +404,17 @@ api.post("/doc-requests", need("docs.request"), async (c) => {
   await logActivity(c.env.DB, user, "docs.request", "customer", customerId, titles.join(", "));
   return c.json({ url, emailStatus, created: titles.length });
 });
-api.post("/doc-requests/:id/cancel", async (c) => {
-  await run(c.env.DB, "UPDATE doc_requests SET status = 'CANCELLED' WHERE id = ?", Number(c.req.param("id")));
+api.post("/doc-requests/:id/cancel", need("docs.request"), async (c) => {
+  const id = Number(c.req.param("id"));
+  const r = await one<any>(c.env.DB, "SELECT id, task_id, title, customer_id FROM doc_requests WHERE id = ?", id);
+  if (!r) return c.json({ error: "Not found" }, 404);
+  await run(c.env.DB, "UPDATE doc_requests SET status = 'CANCELLED' WHERE id = ?", id);
+  // nothing left to wait for on that ticket -> it is back with us
+  if (r.task_id) {
+    const left = await one<{ n: number }>(c.env.DB, "SELECT COUNT(*) n FROM doc_requests WHERE task_id = ? AND status IN ('REQUESTED','SUBMITTED')", r.task_id);
+    if (!left!.n) await run(c.env.DB, "UPDATE tasks SET status = 'IN_PROGRESS' WHERE id = ? AND status = 'WAITING_CLIENT'", r.task_id);
+  }
+  await logActivity(c.env.DB, c.get("user"), "docs.request.cancel", "customer", r.customer_id, r.title);
   return c.json({ ok: true });
 });
 
@@ -483,7 +422,7 @@ api.post("/doc-requests/:id/cancel", async (c) => {
 api.get("/inbox", need("docs.review"), async (c) => {
   const pending = await all(
     c.env.DB,
-    `SELECT d.id, d.name, d.size, d.mime, d.note, d.uploaded_at, d.request_id, r.title AS request_title, c.id AS customer_id, c.name AS customer_name, c.phone
+    `SELECT d.id, d.name, d.original_name, d.size, d.mime, d.note, d.uploaded_at, d.request_id, r.title AS request_title, c.id AS customer_id, c.name AS customer_name, c.phone
        FROM documents d JOIN customers c ON c.id = d.customer_id LEFT JOIN doc_requests r ON r.id = d.request_id
       WHERE d.status = 'PENDING' AND d.source = 'CUSTOMER' ORDER BY d.uploaded_at`
   );
@@ -547,6 +486,21 @@ api.post("/documents/:id/reject", need("docs.review"), async (c) => {
   return c.json({ ok: true });
 });
 
+api.patch("/documents/:id", need("customers.edit"), async (c) => {
+  const id = Number(c.req.param("id"));
+  const d = await one<any>(c.env.DB, "SELECT id, customer_id, name FROM documents WHERE id = ?", id);
+  if (!d) return c.json({ error: "Not found" }, 404);
+  const { name } = await c.req.json();
+  const wanted = cleanName(str(name));
+  if (!wanted) return c.json({ error: "Type a name for the file" }, 400);
+  const ext = extOf(d.name);
+  const base = ext && wanted.toLowerCase().endsWith(ext) ? wanted.slice(0, -ext.length) : wanted; // the file type never changes
+  const next = await uniqueName(c.env.DB, d.customer_id, base, ext, id);
+  await run(c.env.DB, "UPDATE documents SET name = ? WHERE id = ?", next, id);
+  await logActivity(c.env.DB, c.get("user"), "doc.rename", "document", id, `${d.name} -> ${next}`);
+  return c.json({ ok: true, name: next });
+});
+
 api.delete("/documents/:id", need("docs.delete"), async (c) => {
   const d = await one<any>(c.env.DB, "SELECT * FROM documents WHERE id = ?", Number(c.req.param("id")));
   if (d?.r2_key) await c.env.FILES.delete(d.r2_key);
@@ -554,6 +508,20 @@ api.delete("/documents/:id", need("docs.delete"), async (c) => {
   await logActivity(c.env.DB, c.get("user"), "doc.delete", "document", d?.id, d?.name);
   return c.json({ ok: true });
 });
+
+const extOf = (n: string) => { const m = /\.([A-Za-z0-9]{1,6})$/.exec(n); return m ? "." + m[1].toLowerCase() : ""; };
+const cleanName = (n: string) => n.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 110);
+/** "Sharma Traders PAN card.pdf"; adds (2), (3)... when the customer already has a file with that name */
+async function uniqueName(db: D1Database, customerId: number, base: string, ext: string, excludeId = 0) {
+  const root = cleanName(base) || "Document";
+  let name = root + ext;
+  for (let i = 2; i < 50; i++) {
+    const hit = await one(db, "SELECT id FROM documents WHERE customer_id = ? AND lower(name) = lower(?) AND status != 'REJECTED' AND id != ?", customerId, name, excludeId);
+    if (!hit) break;
+    name = `${root} (${i})${ext}`;
+  }
+  return name;
+}
 
 async function storeUpload(env: Env, customerId: number, file: File) {
   const err = checkUpload(file);
@@ -575,7 +543,10 @@ api.post("/customers/:id/documents", need("customers.edit"), async (c) => {
   const s = await storeUpload(c.env, customerId, file);
   if ("error" in s) return c.json({ error: s.error }, 400);
   const user = c.get("user");
-  const r = await run(c.env.DB, `INSERT INTO documents (customer_id, name, r2_key, size, mime, sha256, source, status, note, reviewed_by, reviewed_at) VALUES (?,?,?,?,?,?, 'STAFF','ACCEPTED',?,?, datetime('now'))`, customerId, safeName(file.name), s.key, s.size, s.mime, s.sha, nul(form.get("note")), user.id);
+  const ext = extOf(file.name);
+  const wanted = cleanName(str(form.get("name")));
+  const display = wanted ? await uniqueName(c.env.DB, customerId, wanted.toLowerCase().endsWith(ext) && ext ? wanted.slice(0, -ext.length) : wanted, ext) : await uniqueName(c.env.DB, customerId, safeName(file.name).replace(/\.[A-Za-z0-9]{1,6}$/, ""), ext);
+  const r = await run(c.env.DB, `INSERT INTO documents (customer_id, name, original_name, r2_key, size, mime, sha256, source, status, note, reviewed_by, reviewed_at) VALUES (?,?,?,?,?,?,?, 'STAFF','ACCEPTED',?,?, datetime('now'))`, customerId, display, safeName(file.name), s.key, s.size, s.mime, s.sha, nul(form.get("note")), user.id);
   await logActivity(c.env.DB, user, "doc.upload", "customer", customerId, file.name);
   return c.json({ id: r.meta.last_row_id });
 });
@@ -632,14 +603,20 @@ api.post("/portal/upload", portalAuth, async (c) => {
   const requestId = num(form.get("request_id"));
   if (!file) return c.json({ error: "Please choose a file" }, 400);
   if (requestId) {
-    const r = await one<any>(c.env.DB, "SELECT status FROM doc_requests WHERE id = ? AND customer_id = ?", requestId, cid);
+    const r = await one<any>(c.env.DB, "SELECT status, title FROM doc_requests WHERE id = ? AND customer_id = ?", requestId, cid);
     if (!r || r.status !== "REQUESTED") return c.json({ error: "This request is not open for upload" }, 400);
   }
   const pendingCount = await one<{ n: number }>(c.env.DB, "SELECT COUNT(*) n FROM documents WHERE customer_id = ? AND status = 'PENDING'", cid);
   if (pendingCount!.n >= 30) return c.json({ error: "Too many files awaiting review. Please wait for our team to review them." }, 429);
   const s = await storeUpload(c.env, cid, file);
   if ("error" in s) return c.json({ error: s.error }, 400);
-  await run(c.env.DB, `INSERT INTO documents (customer_id, request_id, name, r2_key, size, mime, sha256, source, status, note) VALUES (?,?,?,?,?,?,?, 'CUSTOMER','PENDING',?)`, cid, requestId, safeName(file.name), s.key, s.size, s.mime, s.sha, nul(form.get("note")));
+  let display = safeName(file.name);
+  if (requestId) {
+    const rq = await one<any>(c.env.DB, "SELECT title FROM doc_requests WHERE id = ?", requestId);
+    const cu = await one<any>(c.env.DB, "SELECT name FROM customers WHERE id = ?", cid);
+    if (rq?.title && cu?.name) display = await uniqueName(c.env.DB, cid, `${cu.name} ${rq.title}`, extOf(file.name)); // jjiajfijia.pdf -> "Gexart Ventures GST Certificate.pdf"
+  }
+  await run(c.env.DB, `INSERT INTO documents (customer_id, request_id, name, original_name, r2_key, size, mime, sha256, source, status, note) VALUES (?,?,?,?,?,?,?,?, 'CUSTOMER','PENDING',?)`, cid, requestId, display, safeName(file.name), s.key, s.size, s.mime, s.sha, nul(form.get("note")));
   if (requestId) await run(c.env.DB, "UPDATE doc_requests SET status = 'SUBMITTED' WHERE id = ?", requestId);
   const who = await one<{ name: string }>(c.env.DB, "SELECT name FROM customers WHERE id = ?", cid);
   await notifyUsers(c.env, await usersWithPerm(c.env, "docs.review"), { title: `${who?.name ?? "A customer"} uploaded a document`, body: safeName(file.name), link: "/inbox" });

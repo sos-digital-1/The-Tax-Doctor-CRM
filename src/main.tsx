@@ -4,7 +4,8 @@ import { BrowserRouter, NavLink, Navigate, Route, Routes, useLocation, useNaviga
 import "./styles.css";
 import "./premium.css";
 import { api, fmtDateTime, User } from "./api";
-import { Avatar, Ctx, Engineered, Icon, Meta } from "./ui";
+import { Avatar, Ctx, Engineered, Icon, Meta, clearCache } from "./ui";
+import { ChangePasswordModal, ForcePassword } from "./components/Password";
 import Login from "./pages/Login";
 import Palette from "./components/Palette";
 
@@ -21,6 +22,9 @@ const Billing = lazy(() => import("./pages/Billing"));
 const Reports = lazy(() => import("./pages/Reports"));
 const Calendar = lazy(() => import("./pages/Calendar"));
 const Portal = lazy(() => import("./pages/Portal"));
+const Reset = lazy(() => import("./pages/Reset"));
+const AppsPage = lazy(() => import("./pages/AppsPage"));
+const isElectron = /Electron\//.test(navigator.userAgent);
 
 try {
   const t = localStorage.getItem("td-theme");
@@ -41,6 +45,8 @@ function Shell({ user, onLogout }: { user: User & { perms: string[] }; onLogout:
   const [mobileNav, setMobileNav] = useState(false);
   const [installEvt, setInstallEvt] = useState<any>(null);
   const [pushState, setPushState] = useState<"unsupported" | "off" | "on" | "nokey">("off");
+  const [pwModal, setPwModal] = useState(false);
+  const [bannerHidden, setBannerHidden] = useState(() => { try { return Date.now() - Number(localStorage.getItem("td-notify-later") || 0) < 3 * 86400000; } catch { return false; } });
   const loc = useLocation();
   const nav = useNavigate();
   const can = useCallback((p: string) => user.perms.includes(p), [user]);
@@ -51,35 +57,40 @@ function Shell({ user, onLogout }: { user: User & { perms: string[] }; onLogout:
   }, []);
 
   const refreshBadges = useCallback(() => {
-    Promise.allSettled([
-      can("docs.review") || can("annual.manage") || true ? api("/dashboard") : Promise.resolve(null),
-      can("chat.use") ? api("/chat/unread") : Promise.resolve({ unread: 0 }),
-      api("/notifications"),
-    ]).then(([d, c, n]) => {
-      setBadges({
-        inbox: d.status === "fulfilled" && d.value && can("docs.review") ? d.value.counts.pendingDocs + d.value.counts.messages : 0,
-        renewals: d.status === "fulfilled" && d.value ? d.value.counts.renewals : 0,
-        chat: c.status === "fulfilled" ? c.value.unread : 0,
-        notif: n.status === "fulfilled" ? n.value.unread : 0,
-      });
-      if (n.status === "fulfilled") setNotifs(n.value.items);
-    });
-  }, [can]);
+    api("/pulse").then((p) => setBadges({ inbox: p.inbox, renewals: p.renewals, chat: p.chat, notif: p.notifications })).catch(() => {});
+  }, []);
 
   useEffect(() => {
     api("/users").then(setUsers).catch(() => {});
     api("/services").then(setServices).catch(() => {});
   }, []);
   useEffect(() => { refreshBadges(); setMenu(""); }, [loc.pathname, refreshBadges]);
+  useEffect(() => { if (menu === "notif") api("/notifications").then((r) => setNotifs(r.items)).catch(() => {}); }, [menu]);
+  // unread count in the window / tab title, like a chat app
+  useEffect(() => {
+    const n = badges.notif + badges.chat;
+    document.title = (n > 0 ? `(${n}) ` : "") + document.title.replace(/^\(\d+\)\s*/, "");
+  }, [badges.notif, badges.chat, loc.pathname]);
+  // warm the page chunks while idle so navigation feels instant
+  useEffect(() => {
+    const warm = () => { [import("./pages/Customers"), import("./pages/Tasks"), import("./pages/Chat"), import("./pages/Recurring"), import("./pages/Billing"), import("./components/TaskModals")].forEach((p) => p.catch(() => {})); };
+    const w = window as any;
+    const id = w.requestIdleCallback ? w.requestIdleCallback(warm, { timeout: 4000 }) : setTimeout(warm, 2000);
+    return () => (w.cancelIdleCallback ? w.cancelIdleCallback(id) : clearTimeout(id));
+  }, []);
   // meaningful window / desktop-tab titles (customer pages set their own)
   useEffect(() => {
     if (/^\/customers\/\d+/.test(loc.pathname)) return;
-    const names: Record<string, string> = { "/": "Dashboard", "/customers": "Customers", "/tasks": "Tickets", "/one-time": "One-time", "/recurring": "Recurring", "/annual": "Annual & renewals", "/inbox": "Review inbox", "/calendar": "Calendar", "/billing": "Billing", "/chat": "Team chat", "/reports": "Reports", "/admin/users": "Users & apps", "/admin/services": "Service catalogue", "/admin/emails": "Email log", "/admin/activity": "Activity log" };
+    const names: Record<string, string> = { "/apps": "Get the apps", "/": "Dashboard", "/customers": "Customers", "/tasks": "Tickets", "/one-time": "One-time", "/recurring": "Recurring", "/annual": "Annual & renewals", "/inbox": "Review inbox", "/calendar": "Calendar", "/billing": "Billing", "/chat": "Team chat", "/reports": "Reports", "/admin/users": "Users & apps", "/admin/services": "Service catalogue", "/admin/emails": "Email log", "/admin/activity": "Activity log" };
     document.title = (names[loc.pathname] || "Tax Doctor") + " · Tax Doctor";
   }, [loc.pathname]);
+  // one small call every 20 s while the app is visible, and straight away when you come back to it
   useEffect(() => {
-    const t = setInterval(() => document.visibilityState === "visible" && refreshBadges(), 15000);
-    return () => clearInterval(t);
+    const tick = () => document.visibilityState === "visible" && refreshBadges();
+    const t = setInterval(tick, 20000);
+    document.addEventListener("visibilitychange", tick);
+    window.addEventListener("focus", tick);
+    return () => { clearInterval(t); document.removeEventListener("visibilitychange", tick); window.removeEventListener("focus", tick); };
   }, [refreshBadges]);
 
   // keyboard: Ctrl/Cmd+K opens search
@@ -150,8 +161,9 @@ function Shell({ user, onLogout }: { user: User & { perms: string[] }; onLogout:
       ["/reports", "Reports", "chart", can("reports.view")],
     ]],
     ["System", [
+      ["/apps", "Get the apps", "download", true],
       ["/admin/services", "Service catalogue", "list", can("catalogue.manage")],
-      ["/admin/users", "Users & apps", "shield", can("users.manage")],
+      ["/admin/users", "Users & access", "shield", can("users.manage")],
       ["/admin/emails", "Email log", "mail", can("reports.view")],
       ["/admin/activity", "Activity log", "log", can("reports.view")],
     ]],
@@ -230,8 +242,8 @@ function Shell({ user, onLogout }: { user: User & { perms: string[] }; onLogout:
                 <div className="menu" style={{ minWidth: 260 }}>
                   <div className="mh"><div><div>{user.name}</div><div className="small muted" style={{ fontWeight: 400 }}>{user.email} · {user.role.charAt(0) + user.role.slice(1).toLowerCase()}</div></div></div>
                   {installEvt && <button className="mi" onClick={() => { installEvt.prompt(); setInstallEvt(null); }}><Icon name="phone" size={16} /> Install as app on this device</button>}
-                  {can("users.manage") && <button className="mi" onClick={() => nav("/admin/users")}><Icon name="download" size={16} /> Get the Android &amp; Windows apps</button>}
-                  <button className="mi" onClick={async () => { const c = window.prompt("Current password"); if (!c) return; const n = window.prompt("New password (min 8 characters)"); if (!n) return; try { await api("/auth/password", { body: { current: c, next: n } }); toast("Password changed"); } catch (e: any) { toast(e.message, true); } }}><Icon name="key" size={16} /> Change password</button>
+                  <button className="mi" onClick={() => nav("/apps")}><Icon name="download" size={16} /> Get the Android &amp; Windows apps</button>
+                  <button className="mi" onClick={() => { setMenu(""); setPwModal(true); }}><Icon name="key" size={16} /> Change password</button>
                   <button className="mi" style={{ color: "var(--red)", fontWeight: 600 }} onClick={onLogout}>Sign out</button>
                 </div>
               )}
@@ -239,6 +251,14 @@ function Shell({ user, onLogout }: { user: User & { perms: string[] }; onLogout:
           </header>
           <main className="main">
             <div className="content">
+              {!isElectron && !bannerHidden && pushState === "off" && "Notification" in window && Notification.permission === "default" && (
+                <div className="notice-bar">
+                  <Icon name="bell" />
+                  <span className="grow">Get an alert when a ticket is assigned or updated, or a colleague messages you - even when the app is closed.</span>
+                  <button className="btn" onClick={enablePush}>Turn on notifications</button>
+                  <button className="btn ghost" onClick={() => { setBannerHidden(true); try { localStorage.setItem("td-notify-later", String(Date.now())); } catch {} }}>Not now</button>
+                </div>
+              )}
               <Suspense fallback={<div className="empty">Loading...</div>}>
                 <Routes>
                   <Route path="/" element={<Dashboard greeting={hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"} />} />
@@ -253,6 +273,7 @@ function Shell({ user, onLogout }: { user: User & { perms: string[] }; onLogout:
                   <Route path="/billing" element={<Billing />} />
                   <Route path="/chat" element={<Chat />} />
                   <Route path="/reports" element={<Reports />} />
+                  <Route path="/apps" element={<AppsPage />} />
                   <Route path="/admin/:tab" element={<Admin />} />
                   <Route path="*" element={<Navigate to="/" />} />
                 </Routes>
@@ -262,22 +283,30 @@ function Shell({ user, onLogout }: { user: User & { perms: string[] }; onLogout:
         </div>
       </div>
       {palette && <Palette onClose={() => setPalette(false)} />}
+      {pwModal && <ChangePasswordModal onClose={() => setPwModal(false)} onDone={(m) => toast(m)} />}
       {toastMsg && <div className={"toast" + (toastMsg.err ? " err" : "")}>{toastMsg.m}</div>}
     </Ctx.Provider>
   );
 }
 
 function Root() {
-  const [user, setUser] = useState<(User & { perms: string[] }) | null | undefined>(undefined);
+  const [user, setUser] = useState<(User & { perms: string[]; must_change?: boolean }) | null | undefined>(undefined);
   const isPortal = useRef(location.pathname.startsWith("/portal/")).current;
+  const isReset = useRef(location.pathname === "/reset").current;
   useEffect(() => {
-    if (isPortal) return;
+    if (isPortal || isReset) return;
     api("/auth/me").then((d) => setUser(d.user)).catch(() => setUser(null));
-  }, [isPortal]);
+    const out = () => { clearCache(); setUser(null); }; // session ended elsewhere
+    window.addEventListener("td-unauth", out);
+    return () => window.removeEventListener("td-unauth", out);
+  }, [isPortal, isReset]);
   if (isPortal) return <Suspense fallback={null}><Routes><Route path="/portal/:token" element={<Portal />} /></Routes></Suspense>;
+  if (isReset) return <Suspense fallback={null}><Reset /></Suspense>;
   if (user === undefined) return <div className="empty">Loading...</div>;
-  if (!user) return <Login onLogin={(u: any) => setUser(u)} />;
-  return <Shell user={user} onLogout={() => api("/auth/logout", { method: "POST" }).finally(() => setUser(null))} />;
+  const logout = () => api("/auth/logout", { method: "POST" }).finally(() => { clearCache(); setUser(null); });
+  if (!user) return <Login onLogin={(u: any) => { clearCache(); setUser(u); }} />;
+  if (user.must_change) return <ForcePassword name={user.name} onLogout={logout} onDone={() => api("/auth/me").then((d) => setUser(d.user)).catch(() => setUser(null))} />;
+  return <Shell user={user} onLogout={logout} />;
 }
 
 createRoot(document.getElementById("root")!).render(

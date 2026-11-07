@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
 import { api, fmtDateTime } from "../api";
-import Apps from "../components/Apps";
-import { Avatar, Empty, Field, Loading, Modal, PageHead, useApp, useLoad } from "../ui";
+import { Avatar, Empty, Field, Loading, Modal, PageHead, PasswordInput, copy, passwordOk, useApp, useLoad } from "../ui";
 
 function PermModal({ u, onClose, onSaved }: { u: any; onClose: () => void; onSaved: () => void }) {
   const { toast } = useApp();
@@ -41,21 +40,86 @@ function PermModal({ u, onClose, onSaved }: { u: any; onClose: () => void; onSav
   );
 }
 
+function MailResult({ r, name, onClose }: { r: any; name: string; onClose: () => void }) {
+  const { toast } = useApp();
+  const secret = r.temp_password || r.reset_link;
+  return (
+    <Modal title={r.reset_link ? "Reset link" : "Account details"} onClose={onClose} footer={<button className="btn primary" onClick={onClose}>Done</button>}>
+      <div className="stack">
+        {r.emailStatus === "SENT" && <div className="alert ok">Email sent to {name}. {r.reset_link === undefined && r.temp_password === undefined ? "They will be asked to choose their own password at first sign-in." : ""}</div>}
+        {r.emailStatus === "LOGGED" && <div className="alert warn">Email is not connected yet (EmailJS keys are missing on the server), so nothing was emailed. Give the details below to {name} yourself.</div>}
+        {r.emailStatus === "FAILED" && <div className="alert">The email could not be sent (see Email log). Give the details below to {name} yourself.</div>}
+        {secret && (
+          <>
+            <div className="small muted">Shown once - it is not stored anywhere readable.</div>
+            <div className="row"><input className="input mono" readOnly value={secret} onFocus={(e) => e.target.select()} /><button className="btn" onClick={() => copy(secret, toast)}>Copy</button></div>
+            {r.temp_password && <div className="small muted">{name} must change this temporary password at first sign-in.</div>}
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function ResetModal({ u, onClose, onResult }: { u: any; onClose: () => void; onResult: (r: any) => void }) {
+  const { toast } = useApp();
+  const [mode, setMode] = useState<"temp" | "link" | "manual">("temp");
+  const [pw, setPw] = useState("");
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true);
+    try {
+      const body = mode === "manual" ? { password: pw } : { reset: mode };
+      const r = await api(`/users/${u.id}`, { method: "PATCH", body });
+      if (mode === "manual") toast(`Password set. ${u.name} must change it at next sign-in.`);
+      else onResult(r);
+      onClose();
+    } catch (e: any) {
+      toast(e.message, true);
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title={`Reset password for ${u.name}`} onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy || (mode === "manual" && !passwordOk(pw))} onClick={go}>{mode === "temp" ? "Email a temporary password" : mode === "link" ? "Email a reset link" : "Set password"}</button></>}>
+      <div className="stack">
+        {[
+          ["temp", "Email a temporary password", "A strong password is generated and emailed. They choose their own at first sign-in."],
+          ["link", "Email a reset link", "They get a link (valid 60 minutes) and pick their own new password."],
+          ["manual", "Set a password myself", "You type it and tell them. They must still change it at first sign-in."],
+        ].map(([k, t, d]) => (
+          <label key={k} className="req" style={{ cursor: "pointer", display: "flex", gap: 10, alignItems: "flex-start", borderColor: mode === k ? "var(--red)" : undefined }}>
+            <input type="radio" name="rm" className="cb" checked={mode === k} onChange={() => setMode(k as any)} style={{ marginTop: 3 }} />
+            <span><b>{t}</b><div className="small muted">{d}</div></span>
+          </label>
+        ))}
+        {mode === "manual" && <PasswordInput label="New password" value={pw} onChange={setPw} autoComplete="new-password" strength />}
+      </div>
+    </Modal>
+  );
+}
+
 function Users() {
   const { toast, user } = useApp();
   const { data, reload } = useLoad(() => api<any[]>("/users"), []);
   const [adding, setAdding] = useState(false);
   const [perm, setPerm] = useState<any>(null);
+  const [reset, setReset] = useState<any>(null);
+  const [result, setResult] = useState<{ r: any; name: string } | null>(null);
   const [f, setF] = useState({ name: "", email: "", role: "STAFF", password: "" });
+  const [busy, setBusy] = useState(false);
   const create = async () => {
-    try { await api("/users", { body: f }); toast("User created"); setAdding(false); setF({ name: "", email: "", role: "STAFF", password: "" }); reload(); } catch (e: any) { toast(e.message, true); }
+    setBusy(true);
+    try {
+      const r = await api("/users", { body: f });
+      setAdding(false);
+      setResult({ r, name: f.name });
+      setF({ name: "", email: "", role: "STAFF", password: "" });
+      reload();
+    } catch (e: any) { toast(e.message, true); }
+    setBusy(false);
   };
   const patch = async (id: number, body: any) => {
     try { await api(`/users/${id}`, { method: "PATCH", body }); reload(); } catch (e: any) { toast(e.message, true); }
-  };
-  const reset = (u: any) => {
-    const p = window.prompt(`New password for ${u.name} (min 8 characters)`);
-    if (p) patch(u.id, { password: p }).then(() => toast("Password changed"));
   };
   return (
     <>
@@ -74,23 +138,26 @@ function Users() {
                   <td><div className="row"><Avatar name={u.name} /><div><b>{u.name}</b><div className="small muted">{u.email}</div></div></div></td>
                   <td><select className="input" style={{ width: 130, padding: "3px 6px" }} disabled={u.id === user.id} value={u.role} onChange={(e) => patch(u.id, { role: e.target.value })}><option value="ADMIN">Admin</option><option value="MANAGER">Manager</option><option value="STAFF">Staff</option></select></td>
                   <td><button className="btn sm" onClick={() => setPerm(u)}>Permissions{custom ? ` (${custom} custom)` : ""}</button> <span className="small muted">{u.perms.length} of 21 allowed</span></td>
-                  <td><span className={"badge " + (u.active ? "ok" : "red")}>{u.active ? "Active" : "Disabled"}</span></td>
-                  <td className="right"><button className="btn sm" onClick={() => reset(u)}>Reset password</button> {u.id !== user.id && <button className="btn sm" onClick={() => patch(u.id, { active: !u.active })}>{u.active ? "Disable" : "Enable"}</button>}</td>
+                  <td><span className={"badge " + (u.active ? "ok" : "red")}>{u.active ? "Active" : "Disabled"}</span>{u.must_change_password ? <span className="badge warn" style={{ marginLeft: 6 }} title="Still on a temporary password">Temp password</span> : null}</td>
+                  <td className="right"><button className="btn sm" onClick={() => setReset(u)}>Reset password</button> {u.id !== user.id && <button className="btn sm" onClick={() => patch(u.id, { active: !u.active })}>{u.active ? "Disable" : "Enable"}</button>}</td>
                 </tr>
               );
             })}</tbody>
           </table></div>
         )}
       </div>
-      <div style={{ marginTop: 18 }}><Apps /></div>
       {perm && <PermModal u={perm} onClose={() => setPerm(null)} onSaved={reload} />}
+      {reset && <ResetModal u={reset} onClose={() => setReset(null)} onResult={(r) => setResult({ r, name: reset.name })} />}
+      {result && <MailResult r={result.r} name={result.name} onClose={() => setResult(null)} />}
       {adding && (
-        <Modal title="New user" onClose={() => setAdding(false)} footer={<><button className="btn" onClick={() => setAdding(false)}>Cancel</button><button className="btn primary" onClick={create}>Create user</button></>}>
+        <Modal title="New user" onClose={() => setAdding(false)} footer={<><button className="btn" onClick={() => setAdding(false)}>Cancel</button><button className="btn primary" disabled={busy || !f.name || !f.email || (!!f.password && !passwordOk(f.password))} onClick={create}>Create &amp; email login</button></>}>
           <div className="form-grid">
             <Field label="Name"><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
             <Field label="Role"><select className="input" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}><option value="STAFF">Staff</option><option value="MANAGER">Manager</option><option value="ADMIN">Admin</option></select></Field>
-            <Field label="Email" full><input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
-            <Field label="Initial password (min 8 characters)" full><input className="input" type="text" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field>
+            <Field label="Email (their login)" full><input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
+            <div className="full">
+              <PasswordInput label="Temporary password (optional)" value={f.password} onChange={(v) => setF({ ...f, password: v })} autoComplete="new-password" strength={!!f.password} hint="Leave empty and we generate a strong one and email it. Either way they must choose their own at first sign-in." />
+            </div>
           </div>
         </Modal>
       )}

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, CATEGORY_LABEL, compressImage, fmtDate, fmtDateTime, fmtSize } from "../api";
-import { Avatar, DueBadge, Empty, Field, Loading, Modal, copy, money, useApp, useLoad, waLink } from "../ui";
+import { Avatar, DueBadge, Empty, Field, Icon, Loading, Modal, copy, money, useApp, useLoad, waLink } from "../ui";
 import { InvoiceForm, InvoiceModal } from "./Billing";
 import { CustomerForm } from "./Customers";
 import { TaskTable } from "./Tasks";
@@ -48,18 +48,32 @@ function EnrolModal({ customerId, onClose, onSaved }: { customerId: number; onCl
   );
 }
 
-function UploadButton({ customerId, onDone }: { customerId: number; onDone: () => void }) {
+const splitExt = (n: string) => { const m = /^(.*?)(\.[A-Za-z0-9]{1,6})$/.exec(n); return m ? [m[1], m[2]] : [n, ""]; };
+
+/** Staff upload: pick a file, then give it a tidy name (default: "<Customer> <what it is>"). */
+function UploadButton({ customerId, customerName, openTitles, onDone }: { customerId: number; customerName: string; openTitles: string[]; onDone: () => void }) {
   const ref = useRef<HTMLInputElement>(null);
   const { toast } = useApp();
+  const [file, setFile] = useState<File | null>(null);
+  const [label, setLabel] = useState("");
   const [busy, setBusy] = useState(false);
-  const pick = async (file?: File) => {
+  const pick = async (f?: File) => {
+    if (!f) return;
+    const small = await compressImage(f);
+    setFile(small);
+    setLabel(customerName + " ");
+  };
+  const ext = file ? splitExt(file.name)[1] : "";
+  const send = async (keepOriginal: boolean) => {
     if (!file) return;
     setBusy(true);
     const form = new FormData();
-    form.append("file", await compressImage(file));
+    form.append("file", file);
+    if (!keepOriginal && label.trim()) form.append("name", label.trim() + ext);
     try {
       await api(`/customers/${customerId}/documents`, { form });
       toast("Document added");
+      setFile(null);
       onDone();
     } catch (e: any) {
       toast(e.message, true);
@@ -70,8 +84,53 @@ function UploadButton({ customerId, onDone }: { customerId: number; onDone: () =
   return (
     <>
       <input ref={ref} type="file" hidden onChange={(e) => pick(e.target.files?.[0])} />
-      <button className="btn sm" disabled={busy} onClick={() => ref.current?.click()}>{busy ? "Uploading..." : "+ Upload file"}</button>
+      <button className="btn sm" onClick={() => ref.current?.click()}>+ Upload file</button>
+      {file && (
+        <Modal title="Name this document" onClose={() => { setFile(null); if (ref.current) ref.current.value = ""; }} footer={<><button className="btn" disabled={busy} onClick={() => send(true)}>Keep original name</button><button className="btn primary" disabled={busy || !label.trim()} onClick={() => send(false)}>{busy ? "Uploading..." : "Upload"}</button></>}>
+          <div className="stack">
+            <div className="small muted">File chosen: <b>{file.name}</b></div>
+            <div>
+              <label className="f">Save as</label>
+              <div className="row"><input className="input" autoFocus value={label} onChange={(e) => setLabel(e.target.value)} onKeyDown={(e) => e.key === "Enter" && label.trim() && send(false)} /><span className="muted mono">{ext}</span></div>
+            </div>
+            {openTitles.length > 0 && (
+              <div>
+                <div className="small muted" style={{ marginBottom: 6 }}>Quick pick from what you asked this customer for:</div>
+                <div className="row wrap" style={{ gap: 6 }}>{openTitles.map((t) => <button key={t} className="badge" style={{ cursor: "pointer" }} onClick={() => setLabel(`${customerName} ${t}`)}>{t}</button>)}</div>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
     </>
+  );
+}
+
+function RenameDocModal({ doc, onClose, onDone }: { doc: any; onClose: () => void; onDone: () => void }) {
+  const { toast } = useApp();
+  const [base, ext] = splitExt(doc.name);
+  const [name, setName] = useState(base);
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    try {
+      const r = await api(`/documents/${doc.id}`, { method: "PATCH", body: { name: name.trim() + ext } });
+      toast(`Renamed to ${r.name}`);
+      onDone();
+      onClose();
+    } catch (e: any) {
+      toast(e.message, true);
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title="Rename document" onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy || !name.trim()} onClick={save}>Save name</button></>}>
+      <div className="stack">
+        <div className="row"><input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && name.trim() && save()} /><span className="muted mono">{ext}</span></div>
+        {doc.original_name && doc.original_name !== doc.name && <div className="small muted">Originally uploaded as <b>{doc.original_name}</b></div>}
+        <div className="small muted">The file type ({ext || "none"}) stays the same.</div>
+      </div>
+    </Modal>
   );
 }
 
@@ -160,6 +219,7 @@ export default function CustomerDetail() {
   const [newTask, setNewTask] = useState(false);
   const [openTask, setOpenTask] = useState<number | null>(null);
   const [req, setReq] = useState(false);
+  const [renaming, setRenaming] = useState<any>(null);
 
   if (!data) return <Loading error={error} />;
   const { customer: c, services, tasks, documents, requests, link, emails } = data;
@@ -180,6 +240,14 @@ export default function CustomerDetail() {
     reload();
   };
   const url = link?.url as string | undefined;
+  const cancelRequest = async (r: any) => {
+    if (r.status === "SUBMITTED" && !window.confirm(`${r.title} was already uploaded and is waiting for your review. Remove the request anyway?`)) return;
+    try {
+      await api(`/doc-requests/${r.id}/cancel`, { method: "POST" });
+      toast(`Removed: ${r.title}`);
+      reload();
+    } catch (e: any) { toast(e.message, true); }
+  };
 
   return (
     <>
@@ -229,7 +297,17 @@ export default function CustomerDetail() {
               <div className="card">
                 <div className="card-h"><h2>Waiting on customer</h2></div>
                 <div className="table-wrap"><table><tbody>
-                  {requests.map((r: any) => <tr key={r.id}><td>{r.title}</td><td><span className={"badge " + (r.status === "SUBMITTED" ? "info" : "warn")}>{r.status === "SUBMITTED" ? "Awaiting your review" : "Requested"}</span></td></tr>)}
+                  {requests.map((r: any) => (
+                    <tr key={r.id}>
+                      <td>{r.title}</td>
+                      <td><span className={"badge " + (r.status === "SUBMITTED" ? "info" : "warn")}>{r.status === "SUBMITTED" ? "Awaiting your review" : "Requested"}</span></td>
+                      <td style={{ width: 44, textAlign: "right" }}>
+                        {can("docs.request") && (
+                          <button className="x" title="Remove this request" aria-label={`Remove request for ${r.title}`} onClick={() => cancelRequest(r)}>×</button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody></table></div>
               </div>
             )}
@@ -275,16 +353,16 @@ export default function CustomerDetail() {
 
       {tab === "documents" && (
         <div className="card">
-          <div className="card-h"><h2 className="grow">Accepted documents</h2><UploadButton customerId={id} onDone={reload} /></div>
+          <div className="card-h"><h2 className="grow">Accepted documents</h2><UploadButton customerId={id} customerName={c.name} openTitles={requests.map((r: any) => r.title)} onDone={reload} /></div>
           {documents.length === 0 ? <Empty>No documents yet. Customer uploads appear here once you accept them in the review inbox.</Empty> : (
             <div className="table-wrap"><table>
               <thead><tr><th>File</th><th>From</th><th>Added</th><th></th></tr></thead>
               <tbody>{documents.map((d: any) => (
                 <tr key={d.id}>
-                  <td><b>{d.name}</b> <span className="muted small">{fmtSize(d.size)}</span></td>
+                  <td><b>{d.name}</b> <span className="muted small">{fmtSize(d.size)}</span>{d.original_name && d.original_name !== d.name && <div className="small muted" title="Name as it was uploaded">was: {d.original_name}</div>}</td>
                   <td><span className="badge">{d.source === "CUSTOMER" ? "Customer" : "Our team"}</span></td>
                   <td>{fmtDate(d.uploaded_at)}</td>
-                  <td className="right"><a className="link" target="_blank" rel="noreferrer" href={`/api/documents/${d.id}/file?inline=1`}>View</a> · <a className="link" href={`/api/documents/${d.id}/file`}>Download</a>
+                  <td className="right"><a className="link" target="_blank" rel="noreferrer" href={`/api/documents/${d.id}/file?inline=1`}>View</a> · {can("customers.edit") && <><button className="link" onClick={() => setRenaming(d)}>Rename</button> · </>}<a className="link" href={`/api/documents/${d.id}/file`}>Download</a>
                     {can("docs.delete") && <> · <button className="link" style={{ color: "var(--muted)" }} onClick={async () => { if (window.confirm("Delete this document permanently?")) { await api(`/documents/${d.id}`, { method: "DELETE" }); reload(); } }}>Delete</button></>}
                   </td>
                 </tr>
@@ -331,6 +409,7 @@ export default function CustomerDetail() {
       {enrol && <EnrolModal customerId={id} onClose={() => setEnrol(false)} onSaved={reload} />}
       {newTask && <NewTaskModal onClose={() => setNewTask(false)} onSaved={reload} defaults={{ customer_id: String(id) }} />}
       {openTask && <TaskModal id={openTask} onClose={() => setOpenTask(null)} onChanged={reload} />}
+      {renaming && <RenameDocModal doc={renaming} onClose={() => setRenaming(null)} onDone={reload} />}
       {req && <DocRequestModal customerId={id} onClose={() => setReq(false)} onSaved={reload} />}
     </>
   );

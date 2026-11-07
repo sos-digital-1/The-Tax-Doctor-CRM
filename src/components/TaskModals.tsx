@@ -241,7 +241,7 @@ export function TaskModal({ id, onClose, onChanged }: { id: number; onClose: () 
                   <tr key={r.id}>
                     <td>{r.title}{r.last_reject_reason && r.status === "REQUESTED" && <div className="small" style={{ color: "var(--red)" }}>Rejected: {r.last_reject_reason}</div>}</td>
                     <td><span className={"badge " + ({ REQUESTED: "warn", SUBMITTED: "info", ACCEPTED: "ok" } as any)[r.status]}>{r.status === "SUBMITTED" ? "Awaiting your review" : r.status.charAt(0) + r.status.slice(1).toLowerCase()}</span></td>
-                    <td className="right">{doc && <a className="link" href={`/api/documents/${doc.id}/file?inline=1`} target="_blank" rel="noreferrer">View {fmtSize(doc.size)}</a>}</td>
+                    <td className="right">{doc && <a className="link" href={`/api/documents/${doc.id}/file?inline=1`} target="_blank" rel="noreferrer">View {fmtSize(doc.size)}</a>}{can("docs.request") && r.status !== "ACCEPTED" && <button className="x" style={{ marginLeft: 10 }} title="Remove this request" aria-label={`Remove request for ${r.title}`} onClick={async () => { if (r.status === "SUBMITTED" && !window.confirm("This was already uploaded and is waiting for review. Remove the request anyway?")) return; await api(`/doc-requests/${r.id}/cancel`, { method: "POST" }); reload(); onChanged(); }}>×</button>}</td>
                   </tr>
                 );
               })}

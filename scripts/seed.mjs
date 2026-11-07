@@ -89,7 +89,9 @@ for (const s of services) {
   const [name, cat, freq, dd = null, off = 1, rule = null, renewMonths = null, desc = null, months = null] = s;
   sql += `INSERT OR IGNORE INTO services (name, category, frequency, due_day, period_offset, renew_rule, renew_months, description, months) VALUES (${[name, cat, freq, dd, off, rule, renewMonths, desc, months].map(q).join(",")});\n`;
 }
-sql += `INSERT OR IGNORE INTO users (name, email, password_hash, role) VALUES ('Administrator', ${q(adminEmail)}, ${q(await hash(password))}, 'ADMIN');\n`;
+// a freshly created production admin must choose their own password at first sign-in (demo accounts are exempt)
+sql += `INSERT OR IGNORE INTO users (name, email, password_hash, role, must_change_password) VALUES ('Administrator', ${q(adminEmail)}, ${q(await hash(password))}, 'ADMIN', ${demo ? 0 : 1});
+`;
 sql += `INSERT OR IGNORE INTO chat_members (channel_id, user_id) SELECT 1, id FROM users WHERE EXISTS (SELECT 1 FROM chat_channels WHERE id = 1);\n`;
 
 if (demo) {

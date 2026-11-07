@@ -10,6 +10,10 @@ export type Env = {
   VAPID_PUBLIC?: string;  // base64url, 65-byte uncompressed P-256 point
   VAPID_PRIVATE?: string; // base64url, 32-byte private scalar
   VAPID_SUBJECT?: string;
+  EMAILJS_SERVICE_ID?: string;   // EmailJS (https://www.emailjs.com) - used first when all four are set
+  EMAILJS_TEMPLATE_ID?: string;  // template variables: {{to_email}} {{to_name}} {{subject}} {{message}}
+  EMAILJS_PUBLIC_KEY?: string;
+  EMAILJS_PRIVATE_KEY?: string;  // needs "Allow EmailJS API for non-browser applications" switched on in EmailJS > Security
 };
 
 export type Role = "ADMIN" | "MANAGER" | "STAFF";
@@ -130,28 +134,57 @@ export async function logActivity(db: D1Database, user: { id: number; name: stri
 }
 
 // ---------- email ----------
-export async function sendMail(env: Env, m: { to: string; subject: string; text: string; customerId?: number; kind?: string }) {
+export async function sendMail(env: Env, m: { to: string; subject: string; text: string; toName?: string; customerId?: number; kind?: string }) {
   let status = "LOGGED";
   let error: string | null = null;
-  if (env.MAIL_API_KEY) {
-    try {
+  try {
+    if (env.EMAILJS_SERVICE_ID && env.EMAILJS_TEMPLATE_ID && env.EMAILJS_PUBLIC_KEY) {
+      const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: env.APP_URL || "https://crm.thetaxdoctor.in" },
+        body: JSON.stringify({
+          service_id: env.EMAILJS_SERVICE_ID,
+          template_id: env.EMAILJS_TEMPLATE_ID,
+          user_id: env.EMAILJS_PUBLIC_KEY,
+          accessToken: env.EMAILJS_PRIVATE_KEY,
+          template_params: { to_email: m.to, to_name: m.toName || m.to, subject: m.subject, message: m.text, from_name: "The Tax Doctor", reply_to: m.to },
+        }),
+      });
+      if (res.ok) status = "SENT";
+      else { status = "FAILED"; error = `EmailJS ${res.status}: ${(await res.text()).slice(0, 200)}`; }
+    } else if (env.MAIL_API_KEY) {
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: { Authorization: `Bearer ${env.MAIL_API_KEY}`, "Content-Type": "application/json" },
         body: JSON.stringify({ from: env.MAIL_FROM, to: [m.to], subject: m.subject, text: m.text }),
       });
       if (res.ok) status = "SENT";
-      else {
-        status = "FAILED";
-        error = (await res.text()).slice(0, 300);
-      }
-    } catch (e: any) {
-      status = "FAILED";
-      error = String(e?.message ?? e);
+      else { status = "FAILED"; error = (await res.text()).slice(0, 300); }
     }
+  } catch (e: any) {
+    status = "FAILED";
+    error = String(e?.message ?? e);
   }
-  await run(env.DB, "INSERT INTO email_log (customer_id, to_email, subject, body, kind, status, error) VALUES (?,?,?,?,?,?,?)", m.customerId ?? null, m.to, m.subject, m.text, m.kind ?? "GENERAL", status, error);
+  // the log keeps the message so staff can see what a customer was told; credentials are blanked
+  const logged = m.text.replace(/(Temporary password: )\S+/g, "$1********").replace(/(reset\?token=)\S+/g, "$1********");
+  await run(env.DB, "INSERT INTO email_log (customer_id, to_email, subject, body, kind, status, error) VALUES (?,?,?,?,?,?,?)", m.customerId ?? null, m.to, m.subject, logged, m.kind ?? "GENERAL", status, error);
   return status;
+}
+
+// ---------- passwords
+export function generatePassword(len = 12): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"; // no look-alike characters
+  const bytes = crypto.getRandomValues(new Uint8Array(len));
+  let out = "";
+  for (const b of bytes) out += alphabet[b % alphabet.length];
+  return /[a-z]/.test(out) && /[A-Z]/.test(out) && /\d/.test(out) ? out : generatePassword(len);
+}
+/** returns a message when the password is not acceptable, otherwise null */
+export function passwordProblem(p: string): string | null {
+  if (p.length < 8) return "Password must be at least 8 characters";
+  if (p.length > 100) return "Password is too long";
+  if (!/[A-Za-z]/.test(p) || !/\d/.test(p)) return "Use at least one letter and one number";
+  return null;
 }
 
 // ---------- uploads ----------

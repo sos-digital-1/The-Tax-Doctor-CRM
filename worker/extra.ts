@@ -18,6 +18,32 @@ export function registerExtra(api: App, o: { PORTAL_COOKIE: string; STAFF_COOKIE
     const unread = (await one<{ n: number }>(c.env.DB, "SELECT COUNT(*) n FROM notifications WHERE user_id = ? AND read = 0", uid))!.n;
     return c.json({ items, unread });
   });
+  // one light call that powers every badge (replaces several separate polls); also refreshes "active now"
+  api.get("/pulse", async (c) => {
+    const u = c.get("user");
+    await run(c.env.DB, "UPDATE users SET last_seen = datetime('now') WHERE id = ?", u.id);
+    const n = async (sql: string, ...p: unknown[]) => (await one<{ n: number }>(c.env.DB, sql, ...p))!.n;
+    const today = todayIST();
+    const [notif, chat, docs, msgs, renewals] = await Promise.all([
+      n("SELECT COUNT(*) n FROM notifications WHERE user_id = ? AND read = 0", u.id),
+      has(c, "chat.use") ? n("SELECT COUNT(*) n FROM chat_messages m JOIN chat_members cm ON cm.channel_id = m.channel_id AND cm.user_id = ?1 WHERE m.id > cm.last_read_id AND m.user_id != ?1", u.id) : Promise.resolve(0),
+      has(c, "docs.review") ? n("SELECT COUNT(*) n FROM documents WHERE status = 'PENDING' AND source = 'CUSTOMER'") : Promise.resolve(0),
+      has(c, "docs.review") ? n("SELECT COUNT(*) n FROM portal_messages WHERE status = 'NEW'") : Promise.resolve(0),
+      n("SELECT COUNT(*) n FROM customer_services cs JOIN services s ON s.id = cs.service_id AND s.category = 'ANNUAL' JOIN customers c ON c.id = cs.customer_id AND c.active = 1 WHERE cs.status = 'ACTIVE' AND cs.next_due <= ?", addDays(today, 15)),
+    ]);
+    return c.json({ notifications: notif, chat, inbox: docs + msgs, renewals });
+  });
+
+  // desktop app: "anything new since id X?" - never marks anything as read
+  api.get("/notifications/poll", async (c) => {
+    const uid = c.get("user").id;
+    const since = Number(c.req.query("since") ?? 0);
+    const latest = (await one<{ m: number }>(c.env.DB, "SELECT COALESCE(MAX(id),0) m FROM notifications WHERE user_id = ?", uid))!.m;
+    if (!since) return c.json({ items: [], latest });
+    const items = await all(c.env.DB, "SELECT id, title, body, link FROM notifications WHERE user_id = ? AND id > ? ORDER BY id LIMIT 20", uid, since);
+    return c.json({ items, latest });
+  });
+
   api.post("/notifications/read", async (c) => {
     const { id } = await c.req.json().catch(() => ({} as any));
     if (id) await run(c.env.DB, "UPDATE notifications SET read = 1 WHERE id = ? AND user_id = ?", Number(id), c.get("user").id);
@@ -181,7 +207,7 @@ export function registerExtra(api: App, o: { PORTAL_COOKIE: string; STAFF_COOKIE
     android: { key: "downloads/TaxDoctor-Team.apk", label: "Android app (APK)", mime: "application/vnd.android.package-archive" },
     windows: { key: "downloads/TaxDoctor-Team-Setup.exe", label: "Windows desktop app", mime: "application/vnd.microsoft.portable-executable" },
   };
-  api.get("/downloads", need("users.manage"), async (c) => {
+  api.get("/downloads", async (c) => {
     const out: any[] = [];
     for (const [id, d] of Object.entries(DL)) {
       const head = await c.env.FILES.head(d.key);
@@ -189,7 +215,7 @@ export function registerExtra(api: App, o: { PORTAL_COOKIE: string; STAFF_COOKIE
     }
     return c.json({ items: out, base: c.env.APP_URL || new URL(c.req.url).origin });
   });
-  api.post("/downloads/link", need("users.manage"), async (c) => {
+  api.post("/downloads/link", async (c) => {
     const { id } = await c.req.json();
     if (!DL[id]) return c.json({ error: "Unknown app" }, 400);
     const token = await signToken({ t: "dl", id }, c.env.SESSION_SECRET, 48 * 3600);

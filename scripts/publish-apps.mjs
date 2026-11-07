@@ -7,7 +7,7 @@ import { execSync } from "node:child_process";
 const target = process.argv.includes("--remote") ? "--remote" : "--local";
 const files = [
   ["desktop/dist/TaxDoctor-Team-Setup.exe", "downloads/TaxDoctor-Team-Setup.exe"],
-  ["mobile/TaxDoctor-Team.apk", "downloads/TaxDoctor-Team.apk"],
+  ["mobile/TaxDoctor-Team.apk", "downloads/TaxDoctor-Team.apk"], // copy of mobile/twa/app/build/outputs/apk/release/app-release.apk
 ];
 for (const [src, key] of files) {
   if (!existsSync(src)) { console.log(`skip  ${src} (not built yet)`); continue; }

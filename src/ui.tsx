@@ -14,22 +14,33 @@ export type Meta = {
 export const Ctx = createContext<Meta>(null as any);
 export const useApp = () => useContext(Ctx);
 
+// Stale-while-revalidate: going back to a page shows the last data instantly while fresh data loads behind it.
+const CACHE = new Map<string, any>();
+export const clearCache = () => CACHE.clear();
 export function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = []) {
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
+  const key = fn.toString() + "|" + JSON.stringify(deps);
+  const [data, setData] = useState<T | null>(() => CACHE.get(key) ?? null);
+  const [loading, setLoading] = useState(!CACHE.has(key));
   const [error, setError] = useState("");
   const seq = useRef(0);
   const load = useCallback(() => {
     const n = ++seq.current;
-    setLoading(true);
+    if (CACHE.has(key)) { setData(CACHE.get(key)); setLoading(false); } else setLoading(true);
     fn()
-      .then((d) => n === seq.current && (setData(d), setError("")))
+      .then((d) => {
+        if (n !== seq.current) return;
+        if (CACHE.size > 80) CACHE.delete(CACHE.keys().next().value as string);
+        CACHE.set(key, d);
+        setData(d);
+        setError("");
+      })
       .catch((e) => n === seq.current && setError(e.message))
       .finally(() => n === seq.current && setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
   useEffect(load, [load]);
-  return { data, loading, error, reload: load, setData };
+  const set = useCallback((v: any) => setData((cur) => { const next = typeof v === "function" ? v(cur) : v; if (next) CACHE.set(key, next); return next; }), [key]);
+  return { data, loading, error, reload: load, setData: set as React.Dispatch<React.SetStateAction<T | null>> };
 }
 
 export function Modal({ title, onClose, children, footer, wide }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
@@ -226,6 +237,61 @@ export function Panel({ icon, title, sub, action, children }: { icon: string; ti
         {action}
       </div>
       {children}
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------- password field with show/hide + strength
+export function passwordScore(p: string) {
+  let n = 0;
+  if (p.length >= 8) n++;
+  if (p.length >= 12) n++;
+  if (/[a-z]/.test(p) && /[A-Z]/.test(p)) n++;
+  if (/\d/.test(p)) n++;
+  if (/[^A-Za-z0-9]/.test(p)) n++;
+  return Math.min(n, 4);
+}
+export const passwordOk = (p: string) => p.length >= 8 && /[A-Za-z]/.test(p) && /\d/.test(p);
+
+export function PasswordInput({ value, onChange, label, placeholder, autoComplete, autoFocus, strength, onEnter, hint }: { value: string; onChange: (v: string) => void; label?: string; placeholder?: string; autoComplete?: string; autoFocus?: boolean; strength?: boolean; onEnter?: () => void; hint?: string }) {
+  const [show, setShow] = useState(false);
+  const [caps, setCaps] = useState(false);
+  const sc = passwordScore(value);
+  const names = ["Too weak", "Weak", "Fair", "Good", "Strong"];
+  return (
+    <div>
+      {label && <label className="f">{label}</label>}
+      <div className="pwfield">
+        <input
+          className="input"
+          type={show ? "text" : "password"}
+          value={value}
+          autoFocus={autoFocus}
+          autoComplete={autoComplete}
+          placeholder={placeholder}
+          spellCheck={false}
+          autoCapitalize="none"
+          onChange={(e) => onChange(e.target.value)}
+          onKeyUp={(e) => setCaps(e.getModifierState && e.getModifierState("CapsLock"))}
+          onKeyDown={(e) => e.key === "Enter" && onEnter && onEnter()}
+        />
+        <button type="button" className="pweye" onClick={() => setShow(!show)} aria-label={show ? "Hide password" : "Show password"} title={show ? "Hide password" : "Show password"}>
+          {show ? (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M17.9 17.9A10.1 10.1 0 0 1 12 20c-7 0-10-8-10-8a18 18 0 0 1 5.1-5.9M9.9 4.2A9.1 9.1 0 0 1 12 4c7 0 10 8 10 8a18 18 0 0 1-2.2 3.2M1 1l22 22M14.1 14.1a3 3 0 1 1-4.2-4.2" /></svg>
+          ) : (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /></svg>
+          )}
+        </button>
+      </div>
+      {caps && <div className="small" style={{ color: "var(--warn)", marginTop: 4 }}>Caps Lock is on</div>}
+      {strength && value && (
+        <div style={{ marginTop: 6 }}>
+          <div className="pwbar"><i className={"s" + sc} style={{ width: (sc + 1) * 20 + "%" }} /></div>
+          <div className="small muted">{names[sc]}{!passwordOk(value) && " - use 8+ characters with a letter and a number"}</div>
+        </div>
+      )}
+      {hint && <div className="small muted" style={{ marginTop: 4 }}>{hint}</div>}
     </div>
   );
 }

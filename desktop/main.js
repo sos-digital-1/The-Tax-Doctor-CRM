@@ -4,7 +4,7 @@
 // Works tab-wise like an internal bank app: one locked-down window, every module / customer in its own tab so several
 // customers can be worked on at the same time without interrupting each other. Tabs can sit on top or down the left side.
 // New tabs open a Chrome-style start page with search. Auto-locks when idle, no dev tools, only talks to your server.
-const { app, BaseWindow, WebContentsView, Menu, ipcMain, shell, session, dialog } = require("electron");
+const { app, BaseWindow, WebContentsView, Menu, ipcMain, shell, session, dialog, Tray, Notification, nativeImage } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
@@ -14,7 +14,9 @@ const MODULES = [
 ];
 const BAR_H = 48; // horizontal tab bar height
 const RAIL_W = 244; // vertical tab rail width
-const IDLE_MS = 15 * 60 * 1000;
+const DEFAULT_SERVER = "https://crm.thetaxdoctor.in"; // opens straight to the sign-in page - nothing to configure
+const POLL_MS = 8000;   // new-notification check (one tiny request)
+const PULSE_MS = 25000; // keeps you "active" for colleagues and refreshes the unread badge
 const PARTITION = "persist:taxdoctor";
 const NEWTAB = "@newtab";
 
@@ -31,8 +33,96 @@ let nextId = 1;
 let idleTimer = null;
 let locked = false;
 let setupView = null;
+let tray = null;
+let quitting = false;
+let lastNotifId = 0;
+let primed = false;
+let unread = 0;
 
 const origin = () => new URL(cfg.serverUrl).origin;
+const appIcon = () => nativeImage.createFromPath(path.join(__dirname, "build", process.platform === "win32" ? "icon.ico" : "icon.png"));
+
+function showWindow() {
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+/** open a link from a notification: reuse the tab already on that page, otherwise open a new tab */
+function openLink(link) {
+  showWindow();
+  if (!link || typeof link !== "string" || !link.startsWith("/")) return;
+  const pathname = link.split("?")[0];
+  const existing = tabs.find((t) => t.kind === "app" && t.path === pathname);
+  if (existing) { existing.view.webContents.loadURL(origin() + link); activate(existing.id); } else addTab(link);
+}
+
+function setBadge(n) {
+  unread = n;
+  try {
+    if (tray) tray.setToolTip(n > 0 ? `Tax Doctor Team - ${n} unread` : "Tax Doctor Team");
+    if (win) {
+      if (n > 0) {
+        const dot = nativeImage.createFromPath(path.join(__dirname, "build", "overlay.png"));
+        win.setOverlayIcon(dot, `${n} unread`);
+      } else win.setOverlayIcon(null, "");
+    }
+  } catch {}
+}
+
+function toast(n) {
+  try {
+    const t = new Notification({ title: n.title || "Tax Doctor", body: n.body || "", icon: appIcon(), silent: false });
+    t.on("click", () => openLink(n.link));
+    t.show();
+  } catch {}
+}
+
+async function pollNotifications() {
+  if (!cfg?.serverUrl || locked) return;
+  try {
+    const r = await session.fromPartition(PARTITION).fetch(origin() + `/api/notifications/poll?since=${lastNotifId}`, { credentials: "include" });
+    if (r.status === 401) { primed = false; lastNotifId = 0; setBadge(0); return; } // signed out - start fresh after the next sign-in
+    if (!r.ok) return;
+    const d = await r.json();
+    if (!primed) { lastNotifId = d.latest || 0; primed = true; return; } // don't replay old alerts on startup
+    if (d.items?.length) {
+      if (d.items.length > 3) toast({ title: `${d.items.length} new updates`, body: "Open Tax Doctor to see them", link: "/" });
+      else d.items.forEach(toast);
+      if (win && !win.isFocused()) { try { win.flashFrame(true); } catch {} }
+      pulse();
+    }
+    if (d.latest > lastNotifId) lastNotifId = d.latest;
+  } catch {}
+}
+async function pulse() {
+  if (!cfg?.serverUrl) return;
+  try {
+    const r = await session.fromPartition(PARTITION).fetch(origin() + "/api/pulse", { credentials: "include" });
+    if (!r.ok) return;
+    const p = await r.json();
+    setBadge((p.notifications || 0) + (p.chat || 0));
+  } catch {}
+}
+
+function createTray() {
+  if (tray) return;
+  tray = new Tray(appIcon().resize({ width: 16, height: 16 }));
+  tray.setToolTip("Tax Doctor Team");
+  tray.on("click", showWindow);
+  const build = () => Menu.buildFromTemplate([
+    { label: "Open Tax Doctor", click: showWindow },
+    { label: "Lock now", click: lockNow },
+    { type: "separator" },
+    { label: "Start with Windows", type: "checkbox", checked: app.getLoginItemSettings().openAtLogin, click: (i) => app.setLoginItemSettings({ openAtLogin: i.checked }) },
+    { label: "Block screenshots of this window", type: "checkbox", checked: cfg.protectScreen === true, click: (i) => { cfg.protectScreen = i.checked; saveCfg(); try { win.setContentProtection(i.checked); } catch {} } },
+    { type: "separator" },
+    { label: "Quit", click: () => { quitting = true; app.quit(); } },
+  ]);
+  tray.setContextMenu(build());
+  tray.on("right-click", () => tray.setContextMenu(build()));
+}
 const layoutMode = () => (cfg.tabLayout === "left" ? "left" : "top");
 
 function layout() {
@@ -50,8 +140,9 @@ const pushTabs = () => shellView.webContents.send("tabs", { tabs: tabs.map((t) =
 
 function resetIdle() {
   clearTimeout(idleTimer);
-  if (locked || !cfg?.serverUrl) return;
-  idleTimer = setTimeout(lockNow, IDLE_MS);
+  const mins = Number(cfg?.idleLockMinutes) || 0; // 0 = never lock automatically (stay signed in like a chat app)
+  if (!mins || locked || !cfg?.serverUrl) return;
+  idleTimer = setTimeout(lockNow, mins * 60 * 1000);
 }
 async function lockNow() {
   if (locked || !tabs.length) return;
@@ -145,8 +236,8 @@ function popupModules() {
 }
 
 function createWindow() {
-  win = new BaseWindow({ width: 1480, height: 920, minWidth: 1000, minHeight: 620, backgroundColor: "#0b0b0d", title: "Tax Doctor Team", icon: path.join(__dirname, "build/icon.png") });
-  if (cfg.protectScreen !== false) win.setContentProtection(true); // blocks screenshots / screen recording of this window
+  win = new BaseWindow({ width: 1480, height: 920, minWidth: 1000, minHeight: 620, backgroundColor: "#0b0b0d", title: "Tax Doctor Team", icon: appIcon() });
+  if (cfg.protectScreen === true) win.setContentProtection(true); // optional: blocks screenshots / screen recording of this window (tray menu)
   Menu.setApplicationMenu(null);
 
   const shellPrefs = { preload: path.join(__dirname, "preload.js"), contextIsolation: true, sandbox: true, devTools: !app.isPackaged };
@@ -158,8 +249,10 @@ function createWindow() {
   lockView.webContents.loadFile(path.join(__dirname, "lock.html"));
 
   win.on("resize", layout);
+  // closing the window keeps the app running in the tray so notifications keep arriving, like Slack
+  win.on("close", (e) => { if (!quitting) { e.preventDefault(); win.hide(); } });
   win.on("closed", () => app.quit());
-  win.on("focus", resetIdle);
+  win.on("focus", () => { resetIdle(); try { win.flashFrame(false); } catch {} });
   shellView.webContents.on("did-finish-load", () => { layout(); pushTabs(); });
   shellView.webContents.setWindowOpenHandler(({ url }) => { openExternalSafe(url); return { action: "deny" }; });
   lockView.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -230,13 +323,19 @@ ipcMain.on("ntp-go", (e, p) => {
   pushTabs();
 });
 
-app.on("second-instance", () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
+app.on("second-instance", showWindow);
 
 app.whenReady().then(() => {
+  app.setAppUserModelId("com.taxdoctor.team"); // own taskbar identity + icon (not "Electron")
   cfg = readCfg();
+  if (!cfg.serverUrl) { cfg.serverUrl = DEFAULT_SERVER; saveCfg(); } // no setup screen: straight to sign-in
   session.fromPartition(PARTITION).setPermissionRequestHandler((wc, permission, cb) => cb(["notifications", "clipboard-sanitized-write", "media"].includes(permission)));
   app.on("web-contents-created", (_e, wc) => wc.on("will-attach-webview", (ev) => ev.preventDefault()));
   createWindow();
+  createTray();
+  setInterval(pollNotifications, POLL_MS);
+  setInterval(pulse, PULSE_MS);
+  try { session.fromPartition(PARTITION).preconnect({ url: cfg.serverUrl, numSockets: 2 }); } catch {}
   if (!cfg.serverUrl) {
     // first run after installing: connect to the firm's server
     setupView = new WebContentsView({ webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, sandbox: true, devTools: false } });
@@ -245,4 +344,5 @@ app.whenReady().then(() => {
     layout();
   } else addTab("/");
 });
+app.on("before-quit", () => { quitting = true; });
 app.on("window-all-closed", () => app.quit());

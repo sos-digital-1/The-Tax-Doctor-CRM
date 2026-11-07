@@ -13,13 +13,13 @@ function qrSvg(text: string) {
 const HELP: Record<string, { icon: string; steps: string[]; upload: string }> = {
   android: {
     icon: "phone",
-    steps: ["Scan the QR code with the phone camera (or open the link in Chrome).", "Download the APK, open it and allow \"Install unknown apps\" for Chrome when asked.", "Open Tax Doctor Team, enter the server address once, then sign in."],
-    upload: "npx wrangler r2 object put tax-doctor-files/downloads/TaxDoctor-Team.apk --file android/TaxDoctor-Team.apk",
+    steps: ["Scan the QR code with the phone camera (or open the link in Chrome).", "Download the APK, open it and allow \"Install unknown apps\" for Chrome when asked.", "Open Tax Doctor Team - it goes straight to the sign-in page. Tap \"Turn on notifications\" when asked so you get alerts."],
+    upload: "node scripts/publish-apps.mjs --remote",
   },
   windows: {
     icon: "monitor",
-    steps: ["Open the link on the Windows PC and download the installer.", "Run it - choose the install folder, finish the wizard and open Tax Doctor Team.", "Enter the server address once, then sign in. Open a tab per customer to work in parallel."],
-    upload: "npx wrangler r2 object put tax-doctor-files/downloads/TaxDoctor-Team-Setup.exe --file desktop/dist/TaxDoctor-Team-Setup.exe",
+    steps: ["Open the link on the Windows PC and download the installer.", "Run it - choose the install folder, finish the wizard and open Tax Doctor Team.", "It opens straight to the sign-in page. Open a tab per customer to work on several at once; alerts appear as Windows notifications and the app keeps running in the tray."],
+    upload: "node scripts/publish-apps.mjs --remote",
   },
 };
 
@@ -36,7 +36,7 @@ export default function Apps() {
   };
 
   return (
-    <Panel icon="download" title="Get the team apps" sub="For staff and admins only. Customers never install anything - they just open their portal link.">
+    <Panel icon="download" title="Team apps" sub="For staff and admins only. Customers never install anything - they just open their portal link.">
       {error && <div className="alert" style={{ margin: 16 }}>{error}</div>}
       <div className="grid g2" style={{ padding: 16 }}>
         {(data?.items || []).map((a: any) => {

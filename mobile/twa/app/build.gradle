@@ -1,0 +1,42 @@
+// Tax Doctor Team for Android - a Trusted Web Activity: the live site (crm.thetaxdoctor.in) running full-screen in Chrome.
+// Built by Smack Online Services OPC Pvt Ltd.
+apply plugin: 'com.android.application'
+
+def keystoreProps = new Properties()
+def keystoreFile = rootProject.file('keystore.properties')
+if (keystoreFile.exists()) keystoreProps.load(new FileInputStream(keystoreFile))
+
+android {
+    namespace = "in.thetaxdoctor.crm"
+    compileSdk = 36
+
+    defaultConfig {
+        applicationId "in.thetaxdoctor.crm"
+        minSdk 24
+        targetSdk 36
+        versionCode 2
+        versionName "1.1"
+    }
+
+    signingConfigs {
+        release {
+            if (keystoreFile.exists()) {
+                storeFile file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+}
+
+dependencies {
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.6.2'
+}

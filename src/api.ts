@@ -16,6 +16,7 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
     credentials: "same-origin",
   });
   const data: any = await res.json().catch(() => ({}));
+  if (res.status === 401 && !path.startsWith("/auth/") && !path.startsWith("/portal/")) window.dispatchEvent(new Event("td-unauth"));
   if (!res.ok) throw new ApiError(data.error || `Request failed (${res.status})`, res.status, data);
   return data as T;
 }

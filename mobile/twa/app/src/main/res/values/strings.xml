@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Tax Doctor Team</string>
+    <!-- Digital Asset Links: proves this app and crm.thetaxdoctor.in belong together, so it runs without a browser bar -->
+    <string name="asset_statements">[{\"relation\": [\"delegate_permission/common.handle_all_urls\"], \"target\": {\"namespace\": \"android_app\", \"package_name\": \"in.thetaxdoctor.crm\", \"sha256_cert_fingerprints\": [\"7C:FE:A7:6F:97:32:4F:B3:FD:7D:B6:1C:E3:E3:BA:33:34:D7:1E:01:45:FB:40:93:06:6E:E1:95:C2:88:0E:91\"]}}]</string>
+</resources>
