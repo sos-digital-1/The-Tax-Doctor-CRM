@@ -13,3 +13,5 @@ mobile/*.apk
 desktop/dist
 .seed.sql
 *.log
+.cloudflare.env
+.prod-secrets.env

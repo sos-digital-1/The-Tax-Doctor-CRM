@@ -66,3 +66,11 @@ npx wrangler secret put MAIL_API_KEY            # optional: Resend key for real 
 npm run deploy
 ```
 Set `APP_URL` and `MAIL_FROM` in `wrangler.jsonc` vars first.
+
+## Production (Cloudflare account: Sosdigitalinc@gmail.com)
+- App: https://crm.thetaxdoctor.in (Worker `the-tax-doctor-crm`, D1 `tax-doctor-db`, R2 `tax-doctor-files`). The workers.dev address is switched off.
+- Secrets live on the Worker (`SESSION_SECRET`, `VAULT_KEY`, `VAPID_*`); a local backup is in the git-ignored `.prod-secrets.env`. **Back up `VAULT_KEY`** - without it stored client passwords cannot be read.
+- Deploy: put `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` in the git-ignored `.cloudflare.env`, then `npm run deploy`.
+  Pushes to `main` also build and deploy automatically through Cloudflare Workers Builds.
+- New migrations: `npx wrangler d1 migrations apply tax-doctor-db --remote`.
+- Publish new app builds: `node scripts/publish-apps.mjs --remote`.
