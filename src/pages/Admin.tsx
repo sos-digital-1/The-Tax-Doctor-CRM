@@ -165,9 +165,9 @@ function Users() {
   const create = async () => {
     setBusy(true);
     try {
-      const r = await api("/users", { body: f });
+      const r = await api("/users", { body: f.role === "TECH" ? { ...f, name: "Tech Admin" } : f });
       setAdding(false);
-      setResult({ r, name: f.name });
+      setResult({ r, name: f.role === "TECH" ? "Tech Admin" : f.name });
       setF({ name: "", email: "", role: "STAFF", password: "", phone: "", designation: "" });
       reload();
     } catch (e: any) { toast(e.message, true); }

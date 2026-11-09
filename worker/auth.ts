@@ -119,6 +119,7 @@ export function registerAuth(api: App, o: { STAFF_COOKIE: string; isSecure: (url
   api.post("/users", need("users.manage"), async (c) => {
     const b = await c.req.json();
     const me0 = c.get("user");
+    if (b.role === "TECH") b.name = TECH_NAME;
     if (!str(b.name) || !str(b.email)) return c.json({ error: "Name and email are required" }, 400);
     if (!ROLES.includes(b.role)) return c.json({ error: "Invalid role" }, 400);
     if (!EMAIL_RE.test(str(b.email))) return c.json({ error: "Enter a valid email address" }, 400);
