@@ -40,6 +40,38 @@ function PermModal({ u, onClose, onSaved }: { u: any; onClose: () => void; onSav
   );
 }
 
+function RolePermModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const { toast } = useApp();
+  const { data, reload } = useLoad(() => api("/perms"), []);
+  const [role, setRole] = useState<"STAFF" | "MANAGER">("STAFF");
+  const [edit, setEdit] = useState<Record<string, Set<string>>>({});
+  if (!data) return <Modal title="Role permissions" onClose={onClose}><Loading /></Modal>;
+  const cur = edit[role] ?? new Set<string>(data.roles[role]);
+  const groups: Record<string, any[]> = {};
+  data.perms.forEach((p: any) => (groups[p.group] ||= []).push(p));
+  const toggle = (k: string) => { const n = new Set(cur); n.has(k) ? n.delete(k) : n.add(k); setEdit({ ...edit, [role]: n }); };
+  const save = async () => {
+    try { await api(`/roles/${role}/perms`, { method: "PUT", body: { perms: [...cur] } }); toast(`${role === "STAFF" ? "Staff" : "Manager"} permissions saved for everyone in that role`); setEdit({ ...edit, [role]: undefined as any }); reload(); onSaved(); } catch (e: any) { toast(e.message, true); }
+  };
+  const reset = async () => { try { await api(`/roles/${role}/perms`, { method: "DELETE" }); setEdit({ ...edit, [role]: undefined as any }); toast("Back to the standard defaults"); reload(); onSaved(); } catch (e: any) { toast(e.message, true); } };
+  return (
+    <Modal title="Role permissions" wide onClose={onClose} footer={<><button className="btn" onClick={onClose}>Close</button><button className="btn" onClick={reset}>Reset to standard</button><button className="btn primary" onClick={save}>Save for all {role === "STAFF" ? "staff" : "managers"}</button></>}>
+      <div className="stack">
+        <div className="seg">{(["STAFF", "MANAGER"] as const).map((r) => <button key={r} className={role === r ? "on" : ""} onClick={() => setRole(r)}>{r === "STAFF" ? "Staff" : "Manager"}</button>)}</div>
+        <div className="small muted">These are the default permissions for everyone with this role. A person's own overrides (Permissions button on their row) still apply on top. Super Admin and Tech Admin always have everything.</div>
+        {Object.entries(groups).map(([g, list]) => (
+          <div key={g}>
+            <div className="crumb">{g}</div>
+            {list.map((p: any) => (
+              <label key={p.key} className="check"><input type="checkbox" className="cb" checked={cur.has(p.key)} onChange={() => toggle(p.key)} /><span className="grow">{p.label}</span></label>
+            ))}
+          </div>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
 function MailResult({ r, name, onClose }: { r: any; name: string; onClose: () => void }) {
   const { toast } = useApp();
   const secret = r.temp_password || r.reset_link;
@@ -156,6 +188,7 @@ function Users() {
   const [perm, setPerm] = useState<any>(null);
   const [reset, setReset] = useState<any>(null);
   const [edit, setEdit] = useState<any>(null);
+  const [roles, setRoles] = useState(false);
   const [del, setDel] = useState<any>(null);
   const [result, setResult] = useState<{ r: any; name: string } | null>(null);
   const [f, setF] = useState({ name: "", email: "", role: "STAFF", password: "", phone: "", designation: "" });
@@ -179,6 +212,7 @@ function Users() {
   return (
     <>
       <PageHead title="Users & access" sub="Pick a role, then fine-tune per person - for example let one person run recurring services, or stop another from touching them.">
+        {(user.role === "ADMIN" || user.role === "TECH") && <button className="btn" onClick={() => setRoles(true)}>Role permissions</button>}
         <button className="btn primary" onClick={() => setAdding(true)}>+ New user</button>
       </PageHead>
       <div className="card">
@@ -202,6 +236,7 @@ function Users() {
           </table></div>
         )}
       </div>
+      {roles && <RolePermModal onClose={() => setRoles(false)} onSaved={reload} />}
       {edit && <EditUserModal u={edit} canEmail={top || edit.role === "STAFF" || edit.role === "MANAGER"} onClose={() => setEdit(null)} onSaved={reload} />}
       {del && <DeleteUserModal u={del} users={data || []} onClose={() => setDel(null)} onDone={reload} />}
       {perm && <PermModal u={perm} onClose={() => setPerm(null)} onSaved={reload} />}

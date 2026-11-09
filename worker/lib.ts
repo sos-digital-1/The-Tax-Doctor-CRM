@@ -232,11 +232,25 @@ export const ROLE_DEFAULTS: Record<Role, string[]> = {
   MANAGER: ALL.filter((k) => k !== "users.manage"),
   STAFF: ["customers.view", "customers.edit", "tasks.create", "docs.request", "docs.review", "chat.use"],
 };
+// Role defaults the Super Admin has changed (loaded from D1, cached a few seconds)
+let ROLE_OVERRIDE: Record<string, string[]> = {};
+let ROLE_LOADED = 0;
+export async function loadRoleDefaults(db: D1Database, force = false) {
+  if (!force && Date.now() - ROLE_LOADED < 8000) return;
+  try {
+    const r = await db.prepare("SELECT role, perms FROM role_permissions").all<{ role: string; perms: string }>();
+    const o: Record<string, string[]> = {};
+    for (const x of r.results ?? []) { try { o[x.role] = (JSON.parse(x.perms) as string[]).filter((k) => ALL.includes(k)); } catch {} }
+    ROLE_OVERRIDE = o;
+  } catch {}
+  ROLE_LOADED = Date.now();
+}
+export const roleDefaults = (): Record<Role, string[]> => ({ ...ROLE_DEFAULTS, ...(ROLE_OVERRIDE as any), ADMIN: ALL, TECH: ALL });
 export function effectivePerms(role: Role, raw?: string | null): string[] {
   if (role === "ADMIN" || role === "TECH") return ALL;
   let o: { grant?: string[]; deny?: string[] } = {};
   try { o = raw ? JSON.parse(raw) : {}; } catch {}
-  const set = new Set([...ROLE_DEFAULTS[role], ...(o.grant ?? [])]);
+  const set = new Set([...(ROLE_OVERRIDE[role] ?? ROLE_DEFAULTS[role]), ...(o.grant ?? [])]);
   for (const d of o.deny ?? []) set.delete(d);
   return [...set].filter((k) => ALL.includes(k));
 }
@@ -294,6 +308,7 @@ export async function notifyCustomer(env: Env, customerId: number, n: { title: s
   await pushTo(env, subs);
 }
 export const usersWithPerm = async (env: Env, perm: string) => {
+  await loadRoleDefaults(env.DB);
   const rows = await all<{ id: number; role: Role; permissions: string | null }>(env.DB, "SELECT id, role, permissions FROM users WHERE active = 1");
   return rows.filter((u) => effectivePerms(u.role, u.permissions).includes(perm)).map((u) => u.id);
 };

@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { Env, StaffUser, all, one, run, effectivePerms, PERMS, ROLE_DEFAULTS, hashPassword, verifyPassword, signToken, verifyToken, randomToken, logActivity, hex, generatePassword, passwordProblem } from "./lib";
+import { Env, StaffUser, all, one, run, effectivePerms, PERMS, roleDefaults, loadRoleDefaults, hashPassword, verifyPassword, signToken, verifyToken, randomToken, logActivity, hex, generatePassword, passwordProblem } from "./lib";
 import { need, has, Vars } from "./guard";
 import { mailUserCreated, mailAdminReset, mailResetLink, mailPasswordChanged } from "./emails";
 
@@ -32,6 +32,7 @@ export function registerAuth(api: App, o: { STAFF_COOKIE: string; isSecure: (url
     if (!p || p.t !== "staff") return c.json({ error: "Not signed in" }, 401);
     const u = await one<StaffUser & { active: number; permissions: string | null; must_change_password: number }>(c.env.DB, "SELECT id, name, email, role, active, permissions, must_change_password FROM users WHERE id = ?", p.uid);
     if (!u || !u.active) return c.json({ error: "Account disabled" }, 401);
+    await loadRoleDefaults(c.env.DB);
     if (u.must_change_password && !ALLOWED_WHILE_CHANGING.includes(path)) return c.json({ error: "Please set a new password first", code: "PASSWORD_CHANGE_REQUIRED" }, 403);
     c.set("user", { id: u.id, name: u.name, email: u.email, role: u.role, perms: effectivePerms(u.role, u.permissions), must_change: !!u.must_change_password });
     if (!p.iat || Date.now() / 1000 - p.iat > REFRESH_AFTER) await issue(c, u.id); // sliding session
@@ -63,7 +64,28 @@ export function registerAuth(api: App, o: { STAFF_COOKIE: string; isSecure: (url
     return c.json({ ok: true });
   });
   api.get("/auth/me", (c) => c.json({ user: c.get("user") }));
-  api.get("/perms", (c) => c.json({ perms: PERMS, roles: ROLE_DEFAULTS }));
+  api.get("/perms", (c) => c.json({ perms: PERMS, roles: roleDefaults() }));
+
+  // Super Admin: default access for a whole role. Individual overrides on a person still apply on top.
+  api.put("/roles/:role/perms", async (c) => {
+    const me = c.get("user");
+    if (me.role !== "ADMIN" && me.role !== "TECH") return c.json({ error: "Only a Super Admin can change role permissions" }, 403);
+    const role = c.req.param("role");
+    if (role !== "MANAGER" && role !== "STAFF") return c.json({ error: "Only Manager and Staff defaults can be changed" }, 400);
+    const b = await c.req.json().catch(() => ({} as any));
+    const keys = (Array.isArray(b.perms) ? b.perms : []).filter((k: unknown) => PERMS.some((p) => p.key === k));
+    await run(c.env.DB, "INSERT INTO role_permissions (role, perms, updated_at) VALUES (?,?,datetime('now')) ON CONFLICT(role) DO UPDATE SET perms = excluded.perms, updated_at = excluded.updated_at", role, JSON.stringify(keys));
+    await loadRoleDefaults(c.env.DB, true);
+    await logActivity(c.env.DB, me, "role.perms", "role", undefined, `${role}: ${keys.length} permissions`);
+    return c.json({ ok: true });
+  });
+  api.delete("/roles/:role/perms", async (c) => {
+    const me = c.get("user");
+    if (me.role !== "ADMIN" && me.role !== "TECH") return c.json({ error: "Only a Super Admin can change role permissions" }, 403);
+    await run(c.env.DB, "DELETE FROM role_permissions WHERE role = ?", c.req.param("role"));
+    await loadRoleDefaults(c.env.DB, true);
+    return c.json({ ok: true });
+  });
 
   // ------------------------------------------------------------ change password (signed in, incl. forced first-login change)
   api.post("/auth/password", async (c) => {
@@ -111,6 +133,7 @@ export function registerAuth(api: App, o: { STAFF_COOKIE: string; isSecure: (url
   // ------------------------------------------------------------ users (admin)
   api.get("/users", async (c) => {
     // everyone needs the list for assignment dropdowns; only id/name/role exposed to non-admins
+    await loadRoleDefaults(c.env.DB);
     const rows = await all(c.env.DB, "SELECT id, name, email, phone, designation, role, active, permissions, must_change_password FROM users ORDER BY name");
     if (has(c, "users.manage")) return c.json(rows.map((r: any) => ({ ...r, perms: effectivePerms(r.role, r.permissions) })));
     return c.json(rows.filter((r: any) => r.active).map((r: any) => ({ id: r.id, name: r.name, role: r.role })));
