@@ -21,7 +21,8 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
   return data as T;
 }
 
-export type User = { id: number; name: string; email: string; role: "ADMIN" | "MANAGER" | "STAFF" };
+export type User = { id: number; name: string; email: string; role: "ADMIN" | "TECH" | "MANAGER" | "STAFF"; phone?: string | null; designation?: string | null };
+export const roleLabel = (r: string) => ({ ADMIN: "Super Admin", TECH: "Tech Admin", MANAGER: "Manager", STAFF: "Staff" } as Record<string, string>)[r] || r;
 
 export const fmtDate = (d?: string | null) => {
   if (!d) return "-";

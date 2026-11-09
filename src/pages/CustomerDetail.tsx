@@ -261,7 +261,8 @@ export default function CustomerDetail() {
             <div><span>Mobile</span><b>{c.phone}</b></div>
             <div><span>GSTIN</span><b className="mono">{c.gstin || "-"}</b></div>
             <div><span>PAN</span><b className="mono">{c.pan || "-"}</b></div>
-            <div><span>Relationship manager</span><b>{c.manager_name ? <span className="row" style={{ gap: 6 }}><Avatar name={c.manager_name} small /> {c.manager_name.replace(/\(.*\)/, "")}</span> : "-"}</b></div>
+            <div><span>Manager</span><b>{c.manager_name ? <span className="row" style={{ gap: 6 }}><Avatar name={c.manager_name} small /> {c.manager_name.replace(/\(.*\)/, "")}</span> : "-"}</b></div>
+            <div><span>Relationship manager</span><b>{c.rm_name ? <span className="row" style={{ gap: 6 }}><Avatar name={c.rm_name} small /> {c.rm_name.replace(/\(.*\)/, "")}</span> : "-"}</b></div>
           </div>
         </div>
         <div className="row wrap">

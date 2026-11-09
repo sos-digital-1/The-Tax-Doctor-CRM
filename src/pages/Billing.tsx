@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, todayStr } from "../api";
-import { Empty, Field, Loading, Modal, PageHead, money, useApp, useLoad } from "../ui";
+import { Empty, Field, Loading, Modal, PageHead, money, useApp, useLoad, LogoTD } from "../ui";
 import { CustomerSelect } from "../components/TaskModals";
 
 export function InvoiceForm({ onClose, onSaved, defaults }: { onClose: () => void; onSaved: (id: number) => void; defaults?: any }) {
@@ -66,7 +66,7 @@ export function InvoiceModal({ id, onClose, onChanged }: { id: number; onClose: 
     <Modal title={inv.number} wide onClose={onClose} footer={<><button className="btn" onClick={() => window.print()}>Print / Save PDF</button><button className="btn primary" onClick={onClose}>Close</button></>}>
       <div className="invoice card">
         <div className="row" style={{ alignItems: "flex-start" }}>
-          <div><img src="/logo-taxdoctor.svg" alt="The Tax Doctor" style={{ height: 38 }} /><div style={{ fontSize: 12, marginTop: 6 }}>Kolkata, West Bengal</div></div>
+          <div><LogoTD h={42} /><div style={{ fontSize: 12, marginTop: 6 }}>Kolkata, West Bengal</div></div>
           <div className="right" style={{ textAlign: "right" }}><div style={{ fontFamily: "var(--display)", fontSize: 24, fontWeight: 800 }}>TAX INVOICE</div><div>{inv.number}</div><div>Date: {fmtDate(inv.issue_date)}</div>{inv.due_date && <div>Due: {fmtDate(inv.due_date)}</div>}</div>
         </div>
         <hr />

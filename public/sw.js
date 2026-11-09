@@ -1,6 +1,6 @@
 // Tax Doctor team app service worker: fast shell (hashed build files come from cache first), offline fallback, and push alerts.
-const CACHE = "td-shell-v3";
-self.addEventListener("install", (e) => { self.skipWaiting(); e.waitUntil(caches.open(CACHE).then((c) => c.addAll(["/", "/logo-taxdoctor.svg", "/logo-mark.svg"]).catch(() => {}))); });
+const CACHE = "td-shell-v4";
+self.addEventListener("install", (e) => { self.skipWaiting(); e.waitUntil(caches.open(CACHE).then((c) => c.addAll(["/", "/icon-192.png"]).catch(() => {}))); });
 self.addEventListener("activate", (e) => e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())));
 
 self.addEventListener("fetch", (e) => {

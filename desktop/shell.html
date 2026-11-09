@@ -8,11 +8,11 @@
   html, body { margin: 0; height: 100%; background: #0b0b0d; font: 13px "Segoe UI", system-ui, sans-serif; color: #c9ccd4; user-select: none; overflow: hidden; }
   .btn { background: none; border: 0; color: #c9ccd4; padding: 0 11px; border-radius: 8px; cursor: pointer; font: inherit; height: 32px; display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
   .btn:hover { background: #1c1d21; color: #fff; }
-  .brand { background: #fff; border-radius: 9px; display: grid; place-items: center; padding: 6px 10px; }
-  .brand img { height: 22px; display: block; }
-  .eng { background: #fff; border-radius: 9px; padding: 6px 10px 7px; display: inline-flex; flex-direction: column; gap: 3px; }
-  .eng span { font-size: 8.5px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700; color: #6b7280; }
-  .eng img { height: 36px; display: block; }
+  .brand { background: #fff; border-radius: 9px; display: grid; place-items: center; padding: 6px 12px; }
+  .logo-td { display: block; height: 26px; aspect-ratio: 1320 / 431; background: url(assets/brand/the-tax-doctor.jpg) 51.03% 33.94% / 151.52% auto no-repeat; }
+  .eng { background: #fff; border-radius: 9px; padding: 3px 10px 3px 12px; display: inline-flex; flex-direction: row; align-items: center; gap: 8px; height: 38px; max-width: 100%; }
+  .eng span { font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700; color: #6b7280; white-space: nowrap; }
+  .eng img { height: 32px; width: auto; display: block; }
   .title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
   .x { width: 18px; height: 18px; line-height: 17px; text-align: center; border-radius: 50%; font-size: 15px; flex-shrink: 0; }
   .x:hover { background: #e11d2e; color: #fff; }
@@ -25,7 +25,7 @@
   body.top .tab { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 9px 0 14px; border-radius: 9px 9px 0 0; background: #16171a; color: #9aa0ab; max-width: 230px; min-width: 70px; flex: 1 1 170px; border: 1px solid #25272c; border-bottom: 0; }
   body.top .tab:hover { background: #1f2024; color: #fff; }
   body.top .tab.on { background: #fff; color: #111; font-weight: 600; }
-  body.top .tools { margin-left: auto; align-self: center; display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  body.top .tools { margin-left: auto; align-self: center; display: flex; align-items: center; gap: 4px; flex-shrink: 0; min-width: 0; }
   body.top .side-only { display: none; }
   body.top .addwrap { align-self: center; display: flex; }
 
@@ -54,7 +54,7 @@
   function render(s) {
     document.body.className = s.layout;
     root.innerHTML = "";
-    const brand = el("div", "brand"); brand.innerHTML = '<img src="assets/taxdoctor.png" alt="The Tax Doctor">'; root.appendChild(brand);
+    const brand = el("div", "brand"); brand.innerHTML = '<span class="logo-td" role="img" aria-label="The Tax Doctor"></span>'; root.appendChild(brand);
 
     const tabsBox = el("div", "tabs");
     s.tabs.forEach((t) => {
@@ -85,7 +85,7 @@
     tools.appendChild(btn(s.layout === "left" ? "⇧ Tabs on top" : "◧ Tabs on side", () => td.setLayout(s.layout === "left" ? "top" : "left"), "Move the tab strip"));
     const lock = btn(s.locked ? "🔒 Locked" : "🔒 Lock now", () => td.lock()); lock.classList.add("lock"); tools.appendChild(lock);
     tools.appendChild(btn("Server", () => td.changeServer(), "Change server address"));
-    const eng = el("div", "eng"); eng.innerHTML = '<span>Built by</span><img src="assets/smack.png" alt="Smack Online Services OPC Pvt Ltd">';
+    const eng = el("div", "eng"); eng.innerHTML = '<span>Built by</span><img src="assets/brand/smack-online-services.webp" alt="Smack Online Services OPC Pvt Ltd">';
     if (s.layout === "left") { eng.style.marginTop = "8px"; }
     tools.appendChild(eng);
     root.appendChild(tools);

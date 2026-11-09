@@ -45,7 +45,8 @@ export function CustomerForm({ initial, onClose, onSaved }: { initial?: any; onC
         {text("gstin", "GSTIN")}
         {text("tan", "TAN")}
         {text("cin", "CIN / LLPIN")}
-        <Field label="Relationship manager (our owner for this client)" full><UserSelect value={f.assigned_to} onChange={(v) => set("assigned_to", v)} disabled={!can("tasks.assign")} /></Field>
+        <Field label="Manager (senior owner of this client)"><UserSelect value={f.manager_id} onChange={(v) => set("manager_id", v)} disabled={!can("customers.assign")} /></Field>
+        <Field label="Relationship manager (day-to-day staff)"><UserSelect value={f.assigned_to} onChange={(v) => set("assigned_to", v)} disabled={!can("customers.assign")} /></Field>
         <Field label="Internal notes" full><textarea className="input" value={f.notes ?? ""} onChange={(e) => set("notes", e.target.value)} /></Field>
       </div>
     </Modal>
@@ -112,11 +113,12 @@ export default function Customers() {
   const nav = useNavigate();
   const { data, error, reload } = useLoad(() => api<any[]>("/customers?q=" + encodeURIComponent(q)), [q]);
   const { user } = useApp();
-  const rows = (data || []).filter((c) => !mine || c.assigned_to === user.id);
+  const rows = (data || []).filter((c) => !mine || c.assigned_to === user.id || c.manager_id === user.id);
+  const [bulkField, setBulkField] = useState<"assigned_to" | "manager_id">("assigned_to");
   const allOn = rows.length > 0 && rows.every((r) => selection.sel.has(r.id));
 
   const exportCsv = () => {
-    const cols = ["name", "type", "contact_person", "phone", "email", "address", "city", "pincode", "pan", "gstin", "manager"];
+    const cols = ["name", "type", "contact_person", "phone", "email", "address", "city", "pincode", "pan", "gstin", "manager", "rm"];
     const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const csv = [cols.join(","), ...rows.map((r) => cols.map((c) => esc(r[c])).join(","))].join("\n");
     const a = document.createElement("a");
@@ -137,21 +139,22 @@ export default function Customers() {
         <label className="row small" style={{ cursor: "pointer" }}><input type="checkbox" className="cb" checked={mine} onChange={(e) => setMine(e.target.checked)} /> My clients only</label>
         <span className="muted small right">{rows.length} customers</span>
       </div>
-      {selection.sel.size > 0 && can("tasks.assign") && (
-        <div className="bulkbar"><b>{selection.sel.size} selected</b><button className="btn primary" onClick={() => setBulk(true)}>Set relationship manager...</button><button className="btn" onClick={selection.clear}>Clear</button></div>
+      {selection.sel.size > 0 && can("customers.assign") && (
+        <div className="bulkbar"><b>{selection.sel.size} selected</b><button className="btn primary" onClick={() => { setBulkField("manager_id"); setBulk(true); }}>Set manager...</button><button className="btn primary" onClick={() => { setBulkField("assigned_to"); setBulk(true); }}>Set relationship manager...</button><button className="btn" onClick={selection.clear}>Clear</button></div>
       )}
       <div className="card">
         {!data ? <Loading error={error} /> : rows.length === 0 ? <Empty>No customers found.</Empty> : (
           <div className="table-wrap"><table>
-            <thead><tr>{can("tasks.assign") && <th style={{ width: 36 }}><Check checked={allOn} onChange={() => selection.setAll(rows.map((r) => r.id), !allOn)} /></th>}<th>Customer</th><th>Contact</th><th>GSTIN / PAN</th><th>Manager</th><th>Services</th><th>Open tickets</th></tr></thead>
+            <thead><tr>{can("customers.assign") && <th style={{ width: 36 }}><Check checked={allOn} onChange={() => selection.setAll(rows.map((r) => r.id), !allOn)} /></th>}<th>Customer</th><th>Contact</th><th>GSTIN / PAN</th><th>Manager</th><th>Relationship mgr</th><th>Services</th><th>Open tickets</th></tr></thead>
             <tbody>
               {rows.map((c) => (
                 <tr key={c.id} className={"click" + (selection.sel.has(c.id) ? " sel" : "")} onClick={() => nav(`/customers/${c.id}`)}>
-                  {can("tasks.assign") && <td><Check checked={selection.sel.has(c.id)} onChange={() => selection.toggle(c.id)} /></td>}
+                  {can("customers.assign") && <td><Check checked={selection.sel.has(c.id)} onChange={() => selection.toggle(c.id)} /></td>}
                   <td><b>{c.name}</b><div className="small muted">{c.type}{c.city ? ` · ${c.city}` : ""}</div></td>
                   <td>{c.contact_person || "-"}<div className="small muted">{c.phone}{c.email ? ` · ${c.email}` : ""}</div></td>
                   <td className="mono small">{c.gstin || "-"}<div className="muted">{c.pan || ""}</div></td>
                   <td>{c.manager ? <span className="row" style={{ gap: 6 }}><Avatar name={c.manager} small />{c.manager.replace(/\(.*\)/, "")}</span> : <span className="muted">-</span>}</td>
+                  <td>{c.rm ? <span className="row" style={{ gap: 6 }}><Avatar name={c.rm} small />{c.rm.replace(/\(.*\)/, "")}</span> : <span className="muted">-</span>}</td>
                   <td>{c.services}</td>
                   <td>{c.open_tasks ? <span className="badge dark">{c.open_tasks}</span> : <span className="muted">0</span>}</td>
                 </tr>
@@ -163,16 +166,16 @@ export default function Customers() {
       {adding && <CustomerForm onClose={() => { setAdding(false); setSp({}, { replace: true }); }} onSaved={(id) => { reload(); id && nav(`/customers/${id}`); }} />}
       {importing && <ImportModal onClose={() => setImporting(false)} onDone={reload} />}
       {bulk && (
-        <BulkAssign title="Set relationship manager" count={selection.sel.size} onClose={() => setBulk(false)} onApply={async (p) => {
+        <BulkAssign title={bulkField === "manager_id" ? "Set manager" : "Set relationship manager"} count={selection.sel.size} onClose={() => setBulk(false)} onApply={async (p) => {
           if (p.assigned_to === undefined && !p.plan && !p.round_robin) return;
           // customers use a single owner each; split/even are dealt out in screen order
           const ids = rows.filter((r) => selection.sel.has(r.id)).map((r) => r.id);
           const jobs: Promise<any>[] = [];
-          if ("assigned_to" in p) jobs.push(api("/customers/bulk", { body: { ids, assigned_to: p.assigned_to } }));
-          else if (p.plan) { let i = 0; for (const s of p.plan) { const part = ids.slice(i, i + s.count); i += s.count; if (part.length) jobs.push(api("/customers/bulk", { body: { ids: part, assigned_to: s.user_id } })); } }
-          else if (p.round_robin) p.round_robin.forEach((u, k) => { const part = ids.filter((_, i) => i % p.round_robin!.length === k); if (part.length) jobs.push(api("/customers/bulk", { body: { ids: part, assigned_to: u } })); });
+          if ("assigned_to" in p) jobs.push(api("/customers/bulk", { body: { ids, [bulkField]: p.assigned_to } }));
+          else if (p.plan) { let i = 0; for (const s of p.plan) { const part = ids.slice(i, i + s.count); i += s.count; if (part.length) jobs.push(api("/customers/bulk", { body: { ids: part, [bulkField]: s.user_id } })); } }
+          else if (p.round_robin) p.round_robin.forEach((u, k) => { const part = ids.filter((_, i) => i % p.round_robin!.length === k); if (part.length) jobs.push(api("/customers/bulk", { body: { ids: part, [bulkField]: u } })); });
           await Promise.all(jobs);
-          toast("Relationship managers updated");
+          toast(bulkField === "manager_id" ? "Managers updated" : "Relationship managers updated");
           selection.clear();
           reload();
         }} />

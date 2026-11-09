@@ -67,7 +67,8 @@ api.get("/customers", need("customers.view"), async (c) => {
     `SELECT c.*,
         (SELECT COUNT(*) FROM tasks t WHERE t.customer_id = c.id AND t.status != 'DONE') AS open_tasks,
         (SELECT COUNT(*) FROM customer_services cs WHERE cs.customer_id = c.id AND cs.status = 'ACTIVE') AS services,
-        (SELECT name FROM users u WHERE u.id = c.assigned_to) AS manager
+        (SELECT name FROM users u WHERE u.id = c.assigned_to) AS rm,
+        (SELECT name FROM users u WHERE u.id = c.manager_id) AS manager
        FROM customers c
       WHERE c.active = 1 ${q ? "AND (c.name LIKE ?1 OR c.phone LIKE ?1 OR c.email LIKE ?1 OR c.gstin LIKE ?1 OR c.pan LIKE ?1 OR c.contact_person LIKE ?1)" : ""}
       ORDER BY c.name LIMIT 500`,
@@ -84,14 +85,14 @@ api.post("/customers", need("customers.edit"), async (c) => {
   const vals = CUSTOMER_FIELDS.map((f) => nul(b[f]));
   vals[0] = str(b.name);
   vals[1] = str(b.type) || "Proprietorship";
-  const r = await run(c.env.DB, `INSERT INTO customers (${CUSTOMER_FIELDS.join(",")}, assigned_to) VALUES (${CUSTOMER_FIELDS.map(() => "?").join(",")}, ?)`, ...vals, num(b.assigned_to));
+  const r = await run(c.env.DB, `INSERT INTO customers (${CUSTOMER_FIELDS.join(",")}, assigned_to, manager_id) VALUES (${CUSTOMER_FIELDS.map(() => "?").join(",")}, ?, ?)`, ...vals, has(c, "customers.assign") ? num(b.assigned_to) : null, has(c, "customers.assign") ? num(b.manager_id) : null);
   await logActivity(c.env.DB, c.get("user"), "customer.create", "customer", r.meta.last_row_id as number, str(b.name));
   return c.json({ id: r.meta.last_row_id });
 });
 
 api.get("/customers/:id", need("customers.view"), async (c) => {
   const id = Number(c.req.param("id"));
-  const customer = await one(c.env.DB, "SELECT c.*, (SELECT name FROM users u WHERE u.id = c.assigned_to) AS manager_name FROM customers c WHERE c.id = ?", id);
+  const customer = await one(c.env.DB, "SELECT c.*, (SELECT name FROM users u WHERE u.id = c.assigned_to) AS rm_name, (SELECT name FROM users u WHERE u.id = c.manager_id) AS manager_name FROM customers c WHERE c.id = ?", id);
   if (!customer) return c.json({ error: "Not found" }, 404);
   const [services, tasks, documents, requests, link, emails] = await Promise.all([
     all(c.env.DB, `SELECT cs.*, s.name AS service_name, s.category, s.frequency, u.name AS assignee FROM customer_services cs JOIN services s ON s.id = cs.service_id LEFT JOIN users u ON u.id = cs.assigned_to WHERE cs.customer_id = ? ORDER BY s.category, s.name`, id),
@@ -110,7 +111,10 @@ api.patch("/customers/:id", need("customers.edit"), async (c) => {
   if (!str(b.name) || !str(b.phone)) return c.json({ error: "Name and phone are required" }, 400);
   const vals = CUSTOMER_FIELDS.map((f) => nul(b[f]));
   vals[0] = str(b.name);
-  await run(c.env.DB, `UPDATE customers SET ${CUSTOMER_FIELDS.map((f) => `${f} = ?`).join(",")}, assigned_to = ? WHERE id = ?`, ...vals, num(b.assigned_to), id);
+  const cur = await one<any>(c.env.DB, "SELECT assigned_to, manager_id FROM customers WHERE id = ?", id);
+  if (!cur) return c.json({ error: "Not found" }, 404);
+  const canAssign = has(c, "customers.assign");
+  await run(c.env.DB, `UPDATE customers SET ${CUSTOMER_FIELDS.map((f) => `${f} = ?`).join(",")}, assigned_to = ?, manager_id = ? WHERE id = ?`, ...vals, canAssign ? num(b.assigned_to) : cur.assigned_to, canAssign ? num(b.manager_id) : cur.manager_id, id);
   await logActivity(c.env.DB, c.get("user"), "customer.update", "customer", id);
   return c.json({ ok: true });
 });

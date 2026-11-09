@@ -1,6 +1,6 @@
 import { FormEvent, useState } from "react";
 import { api, User } from "../api";
-import { Engineered, PasswordInput } from "../ui";
+import { Engineered, LogoTD, PasswordInput } from "../ui";
 
 export default function Login({ onLogin }: { onLogin: (u: User) => void }) {
   const [mode, setMode] = useState<"login" | "forgot" | "sent">("login");
@@ -40,7 +40,7 @@ export default function Login({ onLogin }: { onLogin: (u: User) => void }) {
   return (
     <div className="auth">
       <div className="auth-art">
-        <div className="logo-chip" style={{ alignSelf: "flex-start", height: 44, padding: "6px 14px" }}><img src="/logo-taxdoctor.svg" alt="The Tax Doctor" style={{ height: 30 }} /></div>
+        <div className="logo-chip" style={{ alignSelf: "flex-start", height: 44, padding: "6px 14px" }}><LogoTD h={34} /></div>
         <div>
           <h2>Every filing, renewal and client file in one place.</h2>
           <p>GST, TDS, PF, ESI, licences, ROC and more - assigned, tracked and never missed.</p>

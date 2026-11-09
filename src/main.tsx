@@ -3,9 +3,10 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import "./styles.css";
 import "./premium.css";
-import { api, fmtDateTime, User } from "./api";
-import { Avatar, Ctx, Engineered, Icon, Meta, clearCache } from "./ui";
+import { api, fmtDateTime, roleLabel, User } from "./api";
+import { Avatar, Ctx, Engineered, Icon, LogoTD, Meta, clearCache } from "./ui";
 import { ChangePasswordModal, ForcePassword } from "./components/Password";
+import ProfileModal from "./components/Profile";
 import Login from "./pages/Login";
 import Palette from "./components/Palette";
 
@@ -50,7 +51,7 @@ try {
 
 const urlB64ToUint8 = (b: string) => Uint8Array.from(atob((b + "=".repeat((4 - (b.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
 
-function Shell({ user, onLogout }: { user: User & { perms: string[] }; onLogout: () => void }) {
+function Shell({ user, onLogout, onRefresh }: { user: User & { perms: string[] }; onLogout: () => void; onRefresh: () => void }) {
   const [users, setUsers] = useState<Meta["users"]>([]);
   const [services, setServices] = useState<any[]>([]);
   const [toastMsg, setToastMsg] = useState<{ m: string; err?: boolean } | null>(null);
@@ -63,6 +64,7 @@ function Shell({ user, onLogout }: { user: User & { perms: string[] }; onLogout:
   const [installEvt, setInstallEvt] = useState<any>(null);
   const [pushState, setPushState] = useState<"unsupported" | "off" | "on" | "nokey">("off");
   const [pwModal, setPwModal] = useState(false);
+  const [profileModal, setProfileModal] = useState(false);
   const [alerts, setAlerts] = useState<{ key: number; title: string; body?: string; link?: string }[]>([]);
   const [devices, setDevices] = useState<number | null>(null);
   const lastId = useRef<number | null>(null);
@@ -183,7 +185,7 @@ function Shell({ user, onLogout }: { user: User & { perms: string[] }; onLogout:
     }
   };
 
-  const meta: Meta = { user, users, services, toast, can, isManager: can("tasks.assign"), isAdmin: user.role === "ADMIN", refreshBadges };
+  const meta: Meta = { user, users, services, toast, can, isManager: can("tasks.assign"), isAdmin: user.role === "ADMIN" || user.role === "TECH", refreshBadges };
   const toggleTheme = () => {
     const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = next;
@@ -228,7 +230,7 @@ function Shell({ user, onLogout }: { user: User & { perms: string[] }; onLogout:
       <div className="app" onClick={() => menu && setMenu("")}>
         <aside className={"side" + (collapsed ? " collapsed" : "") + (mobileNav ? " open" : "")}>
           <div className="side-brand">
-            <div className="brand-chip"><img className="full" src="/logo-taxdoctor.svg" alt="The Tax Doctor" /><img className="mark" src="/logo-mark.svg" alt="" /></div>
+            <div className="brand-chip"><LogoTD h={32} className="full" /><img className="mark" src="/icon-192.png" alt="The Tax Doctor" /></div>
             <div className="sub-brand">Practice management</div>
           </div>
           <nav className="side-nav">
@@ -295,9 +297,10 @@ function Shell({ user, onLogout }: { user: User & { perms: string[] }; onLogout:
               <button className="who" onClick={() => setMenu(menu === "user" ? "" : "user")}><Avatar name={user.name} /><b>{user.name.replace(/\(.*\)/, "")}</b></button>
               {menu === "user" && (
                 <div className="menu" style={{ minWidth: 260 }}>
-                  <div className="mh"><div><div>{user.name}</div><div className="small muted" style={{ fontWeight: 400 }}>{user.email} · {user.role.charAt(0) + user.role.slice(1).toLowerCase()}</div></div></div>
+                  <div className="mh"><div><div>{user.name}</div><div className="small muted" style={{ fontWeight: 400 }}>{user.email} · {roleLabel(user.role)}</div></div></div>
                   {installEvt && <button className="mi" onClick={() => { installEvt.prompt(); setInstallEvt(null); }}><Icon name="phone" size={16} /> Install as app on this device</button>}
                   <button className="mi" onClick={() => nav("/apps")}><Icon name="download" size={16} /> Get the Android &amp; Windows apps</button>
+                  <button className="mi" onClick={() => { setMenu(""); setProfileModal(true); }}><Icon name="user" size={16} /> My profile</button>
                   <button className="mi" onClick={() => { setMenu(""); setPwModal(true); }}><Icon name="key" size={16} /> Change password</button>
                   <button className="mi" style={{ color: "var(--red)", fontWeight: 600 }} onClick={onLogout}>Sign out</button>
                 </div>
@@ -338,6 +341,7 @@ function Shell({ user, onLogout }: { user: User & { perms: string[] }; onLogout:
         </div>
       </div>
       {palette && <Palette onClose={() => setPalette(false)} />}
+      {profileModal && <ProfileModal onClose={() => setProfileModal(false)} onSaved={(m) => { toast(m); onRefresh(); }} />}
       {pwModal && <ChangePasswordModal onClose={() => setPwModal(false)} onDone={(m) => toast(m)} />}
       {alerts.length > 0 && (
         <div className="ntoasts">
@@ -371,7 +375,7 @@ function Root() {
   const logout = () => api("/auth/logout", { method: "POST" }).finally(() => { clearCache(); setUser(null); });
   if (!user) return <Login onLogin={(u: any) => { clearCache(); setUser(u); }} />;
   if (user.must_change) return <ForcePassword name={user.name} onLogout={logout} onDone={() => api("/auth/me").then((d) => setUser(d.user)).catch(() => setUser(null))} />;
-  return <Shell user={user} onLogout={logout} />;
+  return <Shell user={user} onLogout={logout} onRefresh={() => api("/auth/me").then((d) => setUser(d.user)).catch(() => {})} />;
 }
 
 createRoot(document.getElementById("root")!).render(

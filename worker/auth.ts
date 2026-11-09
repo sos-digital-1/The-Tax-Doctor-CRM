@@ -7,6 +7,9 @@ import { mailUserCreated, mailAdminReset, mailResetLink, mailPasswordChanged } f
 type App = Hono<{ Bindings: Env; Variables: Vars }>;
 const str = (v: unknown) => (typeof v === "string" ? v.trim() : v == null ? "" : String(v).trim());
 
+const ROLES = ["ADMIN", "TECH", "MANAGER", "STAFF"];
+const TECH_NAME = "Tech Admin";
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SESSION_SECONDS = 30 * 24 * 3600; // stay signed in like a chat app; refreshed while you use it
 const REFRESH_AFTER = 12 * 3600;
 const PUBLIC = ["/api/auth/login", "/api/auth/forgot", "/api/auth/reset", "/api/health"];
@@ -108,19 +111,27 @@ export function registerAuth(api: App, o: { STAFF_COOKIE: string; isSecure: (url
   // ------------------------------------------------------------ users (admin)
   api.get("/users", async (c) => {
     // everyone needs the list for assignment dropdowns; only id/name/role exposed to non-admins
-    const rows = await all(c.env.DB, "SELECT id, name, email, role, active, permissions, must_change_password FROM users ORDER BY name");
+    const rows = await all(c.env.DB, "SELECT id, name, email, phone, designation, role, active, permissions, must_change_password FROM users ORDER BY name");
     if (has(c, "users.manage")) return c.json(rows.map((r: any) => ({ ...r, perms: effectivePerms(r.role, r.permissions) })));
     return c.json(rows.filter((r: any) => r.active).map((r: any) => ({ id: r.id, name: r.name, role: r.role })));
   });
 
   api.post("/users", need("users.manage"), async (c) => {
     const b = await c.req.json();
+    const me0 = c.get("user");
     if (!str(b.name) || !str(b.email)) return c.json({ error: "Name and email are required" }, 400);
-    if (!["ADMIN", "MANAGER", "STAFF"].includes(b.role)) return c.json({ error: "Invalid role" }, 400);
+    if (!ROLES.includes(b.role)) return c.json({ error: "Invalid role" }, 400);
+    if (!EMAIL_RE.test(str(b.email))) return c.json({ error: "Enter a valid email address" }, 400);
+    if (b.role === "TECH") {
+      if (me0.role !== "ADMIN" && me0.role !== "TECH") return c.json({ error: "Only the Super Admin can create the Tech Admin" }, 403);
+      if (await one(c.env.DB, "SELECT id FROM users WHERE role = 'TECH'")) return c.json({ error: "There can be only one Tech Admin, and it already exists" }, 409);
+      b.name = TECH_NAME;
+    }
+    if (b.role === "ADMIN" && me0.role !== "ADMIN" && me0.role !== "TECH") return c.json({ error: "Only a Super Admin can create another Super Admin" }, 403);
     if (b.password) { const p = passwordProblem(str(b.password)); if (p) return c.json({ error: p }, 400); }
     const temp = b.password ? str(b.password) : generatePassword();
     try {
-      const r = await run(c.env.DB, "INSERT INTO users (name, email, password_hash, role, must_change_password) VALUES (?,?,?,?,1)", str(b.name), str(b.email).toLowerCase(), await hashPassword(temp), b.role);
+      const r = await run(c.env.DB, "INSERT INTO users (name, email, password_hash, role, must_change_password, phone, designation) VALUES (?,?,?,?,1,?,?)", str(b.name), str(b.email).toLowerCase(), await hashPassword(temp), b.role, str(b.phone) || null, str(b.designation) || null);
       await run(c.env.DB, "INSERT OR IGNORE INTO chat_members (channel_id, user_id) VALUES (1, ?)", r.meta.last_row_id);
       await logActivity(c.env.DB, c.get("user"), "user.create", "user", r.meta.last_row_id as number, str(b.email));
       const emailStatus = await mailUserCreated(c.env, { name: str(b.name), email: str(b.email).toLowerCase() }, temp, originOf(c));
@@ -135,11 +146,28 @@ export function registerAuth(api: App, o: { STAFF_COOKIE: string; isSecure: (url
     const id = Number(c.req.param("id"));
     const b = await c.req.json();
     const me = c.get("user");
-    if (id === me.id && (b.active === false || (b.role && b.role !== "ADMIN"))) return c.json({ error: "You cannot disable or demote yourself" }, 400);
-    const target = await one<any>(c.env.DB, "SELECT id, name, email FROM users WHERE id = ?", id);
+    if (id === me.id && (b.active === false || (b.role && b.role !== me.role))) return c.json({ error: "You cannot disable or change the role of your own account" }, 400);
+    const target = await one<any>(c.env.DB, "SELECT id, name, email, role FROM users WHERE id = ?", id);
     if (!target) return c.json({ error: "Not found" }, 404);
-    if (b.name) await run(c.env.DB, "UPDATE users SET name = ? WHERE id = ?", str(b.name), id);
-    if (b.role && ["ADMIN", "MANAGER", "STAFF"].includes(b.role)) await run(c.env.DB, "UPDATE users SET role = ? WHERE id = ?", b.role, id);
+    const top = me.role === "ADMIN" || me.role === "TECH";
+    if ((target.role === "ADMIN" || target.role === "TECH") && !top) return c.json({ error: "Only a Super Admin can change this account" }, 403);
+    if (b.role && b.role !== target.role) {
+      if (!ROLES.includes(b.role)) return c.json({ error: "Invalid role" }, 400);
+      if (b.role === "TECH") return c.json({ error: "The Tech Admin is a single fixed account and cannot be assigned to others" }, 400);
+      if (target.role === "TECH") return c.json({ error: "The Tech Admin role cannot be changed" }, 400);
+      if (b.role === "ADMIN" && !top) return c.json({ error: "Only a Super Admin can make another Super Admin" }, 403);
+      await run(c.env.DB, "UPDATE users SET role = ? WHERE id = ?", b.role, id);
+    }
+    if (typeof b.name === "string" && str(b.name) && target.role !== "TECH") await run(c.env.DB, "UPDATE users SET name = ? WHERE id = ?", str(b.name), id);
+    if (typeof b.phone === "string") await run(c.env.DB, "UPDATE users SET phone = ? WHERE id = ?", str(b.phone) || null, id);
+    if (typeof b.designation === "string") await run(c.env.DB, "UPDATE users SET designation = ? WHERE id = ?", str(b.designation) || null, id);
+    if (typeof b.email === "string" && str(b.email).toLowerCase() !== target.email) {
+      const em = str(b.email).toLowerCase();
+      if (!EMAIL_RE.test(em)) return c.json({ error: "Enter a valid email address" }, 400);
+      if (await one(c.env.DB, "SELECT id FROM users WHERE email = ? AND id != ?", em, id)) return c.json({ error: "Another user already has this email" }, 409);
+      await run(c.env.DB, "UPDATE users SET email = ? WHERE id = ?", em, id);
+      await logActivity(c.env.DB, me, "user.email", "user", id, `${target.email} -> ${em}`);
+    }
     if (b.permissions && typeof b.permissions === "object") {
       const clean = (a: unknown) => (Array.isArray(a) ? a.filter((k) => PERMS.some((p) => p.key === k)) : []);
       await run(c.env.DB, "UPDATE users SET permissions = ? WHERE id = ?", JSON.stringify({ grant: clean(b.permissions.grant), deny: clean(b.permissions.deny) }), id);
@@ -169,5 +197,80 @@ export function registerAuth(api: App, o: { STAFF_COOKIE: string; isSecure: (url
     }
     await logActivity(c.env.DB, me, "user.update", "user", id);
     return c.json(result);
+  });
+
+  // ------------------------------------------------------------ everything a user owns (used to preview a delete)
+  const refs = async (db: D1Database) => {
+    const r = await db.prepare(`SELECT m.name AS tbl, f."from" AS col FROM sqlite_master m, pragma_foreign_key_list(m.name) f WHERE m.type = 'table' AND f."table" = 'users' AND m.name NOT LIKE 'sqlite_%' AND m.name NOT LIKE '_cf_%'`).all<{ tbl: string; col: string }>();
+    return r.results ?? [];
+  };
+  const LABEL: Record<string, string> = { tasks: "tickets", customer_services: "recurring / annual services", customers: "customers", documents: "documents reviewed", chat_messages: "chat messages", activity_log: "activity entries" };
+  const DROP = (t: string) => /push|notif|reset/.test(t); // personal, not business data: removed with the user
+
+  api.get("/users/:id/summary", need("users.manage"), async (c) => {
+    const id = Number(c.req.param("id"));
+    const u = await one<any>(c.env.DB, "SELECT id, name, email, role FROM users WHERE id = ?", id);
+    if (!u) return c.json({ error: "Not found" }, 404);
+    const counts: Record<string, number> = {};
+    for (const { tbl, col } of await refs(c.env.DB)) {
+      if (DROP(tbl) || tbl === "chat_members") continue;
+      const n = await one<{ n: number }>(c.env.DB, `SELECT COUNT(*) n FROM "${tbl}" WHERE "${col}" = ?`, id);
+      const k = LABEL[tbl] ?? tbl.replace(/_/g, " ");
+      if (n?.n) counts[k] = (counts[k] ?? 0) + n.n;
+    }
+    return c.json({ user: u, counts, total: Object.values(counts).reduce((a, b) => a + b, 0) });
+  });
+
+  // Delete a user completely. Everything they own is handed to another user first; nothing is lost.
+  api.delete("/users/:id", need("users.manage"), async (c) => {
+    const me = c.get("user");
+    if (me.role !== "ADMIN" && me.role !== "TECH") return c.json({ error: "Only a Super Admin can delete users" }, 403);
+    const id = Number(c.req.param("id"));
+    const b = await c.req.json().catch(() => ({} as any));
+    const to = Number(b.transfer_to);
+    if (id === me.id) return c.json({ error: "You cannot delete your own account" }, 400);
+    const u = await one<any>(c.env.DB, "SELECT id, name, email, role FROM users WHERE id = ?", id);
+    if (!u) return c.json({ error: "Not found" }, 404);
+    if (u.role === "TECH") return c.json({ error: "The Tech Admin account cannot be deleted" }, 400);
+    if (u.role === "ADMIN" && (await one<{ n: number }>(c.env.DB, "SELECT COUNT(*) n FROM users WHERE role IN ('ADMIN','TECH') AND active = 1 AND id != ?", id))!.n < 1) return c.json({ error: "This is the last Super Admin" }, 400);
+    const dest = await one<any>(c.env.DB, "SELECT id, name FROM users WHERE id = ? AND active = 1", to);
+    if (!dest || dest.id === id) return c.json({ error: "Choose another active user to receive this user's work" }, 400);
+    if (String(b.confirm ?? "").toLowerCase() !== u.email.toLowerCase()) return c.json({ error: "Type the user's email to confirm" }, 400);
+
+    const stmts: D1PreparedStatement[] = [];
+    for (const { tbl, col } of await refs(c.env.DB)) {
+      if (tbl === "chat_members") {
+        stmts.push(c.env.DB.prepare(`INSERT OR IGNORE INTO chat_members (channel_id, user_id) SELECT channel_id, ? FROM chat_members WHERE user_id = ?`).bind(to, id));
+        stmts.push(c.env.DB.prepare(`DELETE FROM chat_members WHERE user_id = ?`).bind(id));
+      } else if (DROP(tbl)) stmts.push(c.env.DB.prepare(`DELETE FROM "${tbl}" WHERE "${col}" = ?`).bind(id));
+      else stmts.push(c.env.DB.prepare(`UPDATE "${tbl}" SET "${col}" = ? WHERE "${col}" = ?`).bind(to, id));
+    }
+    stmts.push(c.env.DB.prepare(`DELETE FROM users WHERE id = ?`).bind(id));
+    try { await c.env.DB.batch(stmts); } catch (e: any) { return c.json({ error: "Could not delete: " + (e?.message ?? e) }, 500); }
+    await logActivity(c.env.DB, me, "user.delete", "user", id, `${u.email} removed; data moved to ${dest.name}`);
+    return c.json({ ok: true, moved_to: dest.name });
+  });
+
+  // ------------------------------------------------------------ my own profile (name, phone, designation, email)
+  api.get("/auth/profile", async (c) => c.json(await one<any>(c.env.DB, "SELECT id, name, email, phone, designation, role FROM users WHERE id = ?", c.get("user").id)));
+  api.patch("/auth/profile", async (c) => {
+    const me = c.get("user");
+    const b = await c.req.json().catch(() => ({} as any));
+    const u = await one<any>(c.env.DB, "SELECT * FROM users WHERE id = ?", me.id);
+    if (typeof b.name === "string") {
+      if (!str(b.name)) return c.json({ error: "Name cannot be empty" }, 400);
+      if (u.role !== "TECH") await run(c.env.DB, "UPDATE users SET name = ? WHERE id = ?", str(b.name), me.id);
+    }
+    if (typeof b.phone === "string") await run(c.env.DB, "UPDATE users SET phone = ? WHERE id = ?", str(b.phone) || null, me.id);
+    if (typeof b.designation === "string") await run(c.env.DB, "UPDATE users SET designation = ? WHERE id = ?", str(b.designation) || null, me.id);
+    if (typeof b.email === "string" && str(b.email).toLowerCase() !== u.email) {
+      const em = str(b.email).toLowerCase();
+      if (!EMAIL_RE.test(em)) return c.json({ error: "Enter a valid email address" }, 400);
+      if (!(await verifyPassword(str(b.current), u.password_hash))) return c.json({ error: "Enter your current password to change your email" }, 400);
+      if (await one(c.env.DB, "SELECT id FROM users WHERE email = ? AND id != ?", em, me.id)) return c.json({ error: "Another user already has this email" }, 409);
+      await run(c.env.DB, "UPDATE users SET email = ? WHERE id = ?", em, me.id);
+    }
+    await logActivity(c.env.DB, me, "profile.update", "user", me.id);
+    return c.json({ ok: true, user: await one<any>(c.env.DB, "SELECT id, name, email, phone, designation, role FROM users WHERE id = ?", me.id) });
   });
 }

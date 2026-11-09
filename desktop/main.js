@@ -237,8 +237,22 @@ function wireTab(tab) {
     if (ctrl && input.key === "Tab") { e.preventDefault(); const i = tabs.findIndex((x) => x.id === active); activate(tabs[(i + (input.shift ? tabs.length - 1 : 1)) % tabs.length].id); }
   });
   wc.on("did-fail-load", (e, code, desc, url, isMain) => {
-    if (isMain && code !== -3 && tab.kind === "app") wc.loadFile(path.join(__dirname, "setup.html"), { query: { error: desc, server: cfg.serverUrl } });
+    if (!isMain || code === -3 || tab.kind !== "app") return;
+    log(`tab "${tab.path}" failed to load (${code} ${desc})`);
+    wc.loadFile(path.join(__dirname, "setup.html"), { query: { error: desc, server: cfg.serverUrl } });
+    // offline / DNS / timeout: keep trying quietly so the tab comes back by itself when the network does
+    if ([-100, -101, -102, -105, -106, -109, -118, -137, -324].includes(code)) {
+      clearTimeout(tab.retry);
+      tab.retry = setTimeout(() => { if (!wc.isDestroyed() && tabs.includes(tab)) wc.loadURL(origin() + (tab.path || "/")).catch(() => {}); }, 8000);
+    }
   });
+  // a crashed or frozen page must never leave a dead tab
+  wc.on("render-process-gone", (e, d) => {
+    log(`tab "${tab.path}" renderer gone: ${d.reason}`);
+    if (d.reason !== "clean-exit" && !wc.isDestroyed()) setTimeout(() => { try { tab.kind === "app" ? wc.loadURL(origin() + (tab.path || "/")) : wc.reload(); } catch {} }, 600);
+  });
+  wc.on("unresponsive", () => { log(`tab "${tab.path}" unresponsive`); setTimeout(() => { try { if (!wc.isDestroyed() && tab.kind === "app") wc.reload(); } catch {} }, 15000); });
+  wc.on("responsive", () => {});
 }
 
 function activate(id) {
@@ -261,8 +275,14 @@ function popupModules() {
   Menu.buildFromTemplate(MODULES.map(([label, p]) => ({ label, click: () => addTab(p) }))).popup({ window: undefined });
 }
 
+// remembered window position must still be on a connected screen
+function onScreen(b) {
+  try { return require("electron").screen.getAllDisplays().some((d) => b.x >= d.bounds.x - 50 && b.y >= d.bounds.y - 50 && b.x < d.bounds.x + d.bounds.width - 100 && b.y < d.bounds.y + d.bounds.height - 100); } catch { return false; }
+}
+
 function createWindow() {
-  win = new BaseWindow({ width: 1480, height: 920, minWidth: 1000, minHeight: 620, backgroundColor: "#0b0b0d", title: "Tax Doctor Team", icon: appIcon() });
+  const b = cfg.bounds || {};
+  win = new BaseWindow({ width: b.width || 1480, height: b.height || 920, ...(Number.isFinite(b.x) && Number.isFinite(b.y) && onScreen(b) ? { x: b.x, y: b.y } : {}), minWidth: 1000, minHeight: 620, backgroundColor: "#0b0b0d", title: "Tax Doctor Team", icon: appIcon() });
   if (cfg.protectScreen === true) win.setContentProtection(true); // optional: blocks screenshots / screen recording of this window (tray menu)
   Menu.setApplicationMenu(null);
 
@@ -274,7 +294,13 @@ function createWindow() {
   win.contentView.addChildView(lockView);
   lockView.webContents.loadFile(path.join(__dirname, "lock.html"));
 
-  win.on("resize", layout);
+  if (b.maximized) win.maximize();
+  let saveT;
+  const keepBounds = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { if (win.isDestroyed()) return; cfg.bounds = { ...(win.isMaximized() || win.isMinimized() ? (cfg.bounds || {}) : win.getBounds()), maximized: win.isMaximized() }; saveCfg(); } catch {} }, 500); };
+  win.on("resize", () => { layout(); keepBounds(); });
+  win.on("move", keepBounds);
+  win.on("maximize", keepBounds);
+  win.on("unmaximize", keepBounds);
   // closing the window keeps the app running in the tray so notifications keep arriving, like Slack
   win.on("close", (e) => { if (!quitting) { e.preventDefault(); win.hide(); } });
   win.on("closed", () => app.quit());
@@ -371,4 +397,7 @@ app.whenReady().then(() => {
   } else addTab("/");
 });
 app.on("before-quit", () => { quitting = true; });
+process.on("uncaughtException", (e) => { try { log("uncaughtException: " + (e && e.stack || e)); } catch {} });
+process.on("unhandledRejection", (e) => { try { log("unhandledRejection: " + (e && e.stack || e)); } catch {} });
+app.on("child-process-gone", (_e, d) => { try { log(`child process gone: ${d.type} ${d.reason}`); } catch {} });
 app.on("window-all-closed", () => app.quit());

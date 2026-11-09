@@ -206,11 +206,16 @@ export function Check({ checked, onChange }: { checked: boolean; onChange: () =>
   return <input type="checkbox" className="cb" checked={checked} onChange={onChange} onClick={(e) => e.stopPropagation()} />;
 }
 
+/** The Tax Doctor logo exactly as supplied. h = visible height in px. */
+export function LogoTD({ h = 28, className = "" }: { h?: number; className?: string }) {
+  return <span className={"logo-td " + className} role="img" aria-label="The Tax Doctor" style={{ height: h }} />;
+}
+
 export function Engineered({ dark }: { dark?: boolean }) {
   return (
     <div className={"engineered" + (dark ? " dark" : "")}>
       <span>Built by</span>
-      <img src="/logo-smack.png" alt="Smack Online Services OPC Pvt Ltd" />
+      <img src="/brand/smack-online-services.webp" alt="Smack Online Services OPC Pvt Ltd" />
     </div>
   );
 }

@@ -16,7 +16,7 @@ export type Env = {
   EMAILJS_PRIVATE_KEY?: string;  // needs "Allow EmailJS API for non-browser applications" switched on in EmailJS > Security
 };
 
-export type Role = "ADMIN" | "MANAGER" | "STAFF";
+export type Role = "ADMIN" | "TECH" | "MANAGER" | "STAFF"; // ADMIN is shown as "Super Admin"; TECH is the single "Tech Admin"
 export type StaffUser = { id: number; name: string; email: string; role: Role };
 
 const enc = new TextEncoder();
@@ -205,6 +205,7 @@ export const PERMS: { key: string; label: string; group: string }[] = [
   { key: "customers.view", label: "View customers", group: "Customers" },
   { key: "customers.edit", label: "Add / edit customers", group: "Customers" },
   { key: "customers.delete", label: "Archive customers", group: "Customers" },
+  { key: "customers.assign", label: "Assign customers to managers / staff", group: "Customers" },
   { key: "customers.import", label: "Import / export customer lists", group: "Customers" },
   { key: "tasks.view_all", label: "See every ticket (not only own + unassigned)", group: "Tickets" },
   { key: "tasks.create", label: "Create tickets", group: "Tickets" },
@@ -227,11 +228,12 @@ export const PERMS: { key: string; label: string; group: string }[] = [
 const ALL = PERMS.map((p) => p.key);
 export const ROLE_DEFAULTS: Record<Role, string[]> = {
   ADMIN: ALL,
+  TECH: ALL,
   MANAGER: ALL.filter((k) => k !== "users.manage"),
   STAFF: ["customers.view", "customers.edit", "tasks.create", "docs.request", "docs.review", "chat.use"],
 };
 export function effectivePerms(role: Role, raw?: string | null): string[] {
-  if (role === "ADMIN") return ALL;
+  if (role === "ADMIN" || role === "TECH") return ALL;
   let o: { grant?: string[]; deny?: string[] } = {};
   try { o = raw ? JSON.parse(raw) : {}; } catch {}
   const set = new Set([...ROLE_DEFAULTS[role], ...(o.grant ?? [])]);

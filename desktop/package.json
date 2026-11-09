@@ -1,6 +1,6 @@
 {
   "name": "tax-doctor-desktop",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "The Tax Doctor - internal team desktop app (staff only)",
   "main": "main.js",
   "author": "Smack Online Services OPC Pvt Ltd",

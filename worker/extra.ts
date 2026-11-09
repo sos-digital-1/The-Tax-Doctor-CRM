@@ -331,9 +331,11 @@ export function registerExtra(api: App, o: { PORTAL_COOKIE: string; STAFF_COOKIE
     const b = await c.req.json();
     const ids: number[] = (b.ids ?? []).map(Number).filter(Boolean);
     if (!ids.length) return c.json({ error: "Select customers first" }, 400);
-    if ("assigned_to" in b) {
-      if (!has(c, "tasks.assign")) return c.json({ error: "You cannot assign customers to others" }, 403);
-      await run(c.env.DB, `UPDATE customers SET assigned_to = ? WHERE id IN (${ph(ids.length)})`, num(b.assigned_to), ...ids);
+    if ("assigned_to" in b || "manager_id" in b) {
+      if (!has(c, "customers.assign")) return c.json({ error: "You cannot assign customers to others" }, 403);
+      if ("assigned_to" in b) await run(c.env.DB, `UPDATE customers SET assigned_to = ? WHERE id IN (${ph(ids.length)})`, num(b.assigned_to), ...ids);
+      if ("manager_id" in b) await run(c.env.DB, `UPDATE customers SET manager_id = ? WHERE id IN (${ph(ids.length)})`, num(b.manager_id), ...ids);
+      await logActivity(c.env.DB, c.get("user"), "customer.assign", "customer", undefined, `${ids.length} customers`);
     }
     return c.json({ updated: ids.length });
   });

@@ -8,7 +8,7 @@
   html, body { margin: 0; height: 100%; background: #f4f5f8; font: 14px "Segoe UI", system-ui, sans-serif; color: #15161a; }
   .page { min-height: 100%; display: flex; flex-direction: column; align-items: center; padding: 9vh 24px 24px; }
   .logo { background: #fff; border: 1px solid #e4e6ea; border-radius: 16px; padding: 14px 26px; box-shadow: 0 4px 24px rgba(16,24,40,.06); }
-  .logo img { height: 44px; display: block; }
+  .logo .logo-td { display: block; height: 44px; aspect-ratio: 1320 / 431; background: url(assets/brand/the-tax-doctor.jpg) 51.03% 33.94% / 151.52% auto no-repeat; }
   .tag { color: #667085; margin: 14px 0 26px; }
   .box { position: relative; width: min(680px, 100%); }
   .search { width: 100%; padding: 15px 20px 15px 50px; border-radius: 999px; border: 1px solid #d7dae0; background: #fff; font: inherit; font-size: 16px; outline: none; box-shadow: 0 2px 10px rgba(16,24,40,.06); }
@@ -34,14 +34,14 @@
   .chip:hover { border-color: #e11d2e; color: #e11d2e; }
   .foot { margin-top: auto; padding-top: 30px; display: flex; flex-direction: column; align-items: center; gap: 6px; color: #8a8f9b; font-size: 12px; }
   .eng { display: inline-flex; align-items: center; gap: 8px; }
-  .eng img { height: 40px; }
+  .eng img { height: 56px; }
   .hint { color: #667085; font-size: 12px; margin-top: 10px; }
   .login { color: #e11d2e; cursor: pointer; font-weight: 600; }
 </style>
 </head>
 <body>
 <div class="page">
-  <div class="logo"><img src="assets/taxdoctor.png" alt="The Tax Doctor" /></div>
+  <div class="logo"><span class="logo-td" role="img" aria-label="The Tax Doctor"></span></div>
   <div class="tag">Search a customer, ticket, phone number or GSTIN - each result opens right here, so you can keep other customers open in their own tabs.</div>
   <div class="box">
     <span class="mag">🔍</span>
@@ -56,7 +56,7 @@
   <div id="tiles" class="tiles"></div>
 
   <div class="foot">
-    <div class="eng">Built by <img src="assets/smack.png" alt="Smack Online Services OPC Pvt Ltd" /></div>
+    <div class="eng">Built by <img src="assets/brand/smack-online-services.webp" alt="Smack Online Services OPC Pvt Ltd" /></div>
   </div>
 </div>
 <script>

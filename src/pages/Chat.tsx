@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, compressImage, fmtDateTime, fmtSize } from "../api";
+import { api, compressImage, fmtDateTime, fmtSize, roleLabel } from "../api";
 import { Avatar, Field, Icon, Modal, PageHead, useApp } from "../ui";
 
 // turn "TD-0012" into a link to that ticket
@@ -38,6 +38,7 @@ export default function Chat() {
   const [preview, setPreview] = useState("");
   const [lightbox, setLightbox] = useState("");
   const [drag, setDrag] = useState(false);
+  const [conv, setConv] = useState(false); // phones: false = conversation list, true = open conversation
   const fileInput = useRef<HTMLInputElement>(null);
   const [modal, setModal] = useState<"" | "dm" | "channel">("");
   const [chName, setChName] = useState("");
@@ -116,6 +117,7 @@ export default function Chat() {
     setModal("");
     await loadChannels();
     setActive(r.id);
+    setConv(true);
   };
   const createChannel = async () => {
     try {
@@ -142,14 +144,14 @@ export default function Chat() {
   return (
     <>
       <PageHead title="Team chat" sub="Talk to colleagues, share ticket numbers like TD-0012 and they become links." />
-      <div className="card chat">
+      <div className={"card chat" + (conv ? " conv" : "")}>
         <div className="chat-side">
           <div className="row" style={{ padding: 10 }}>
             <button className="btn sm grow" onClick={() => setModal("dm")}>+ Direct message</button>
             <button className="btn sm grow" onClick={() => setModal("channel")}>+ Channel</button>
           </div>
           {channels.map((c) => (
-            <div key={c.id} className={"chat-item" + (c.id === active ? " on" : "")} onClick={() => setActive(c.id)}>
+            <div key={c.id} className={"chat-item" + (c.id === active ? " on" : "")} onClick={() => { setActive(c.id); setConv(true); }}>
               {c.kind === "DM" ? <span className="pwrap"><Avatar name={c.name} /><Dot active={pOf(c.other_id).active} /></span> : <span className="avatar gray">#</span>}
               <div className="grow" style={{ minWidth: 0 }}>
                 <div className="row"><b className="grow" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.kind === "DM" ? c.name.replace(/\(.*\)/, "") : "# " + c.name}</b>{c.unread > 0 && <span className="badge red">{c.unread}</span>}</div>
@@ -160,6 +162,7 @@ export default function Chat() {
         </div>
         <div className="chat-main" onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={(e) => { e.preventDefault(); setDrag(false); pick(e.dataTransfer.files[0]); }} style={drag ? { outline: "2px dashed var(--red)", outlineOffset: -6 } : undefined}>
           <div className="card-h">
+            <button className="btn sm chat-back" onClick={() => setConv(false)} aria-label="Back to chats">‹</button>
             <div className="grow">
               <h2>{cur ? (cur.kind === "DM" ? cur.name : "# " + cur.name) : "Select a conversation"}</h2>
               {cur && cur.kind === "DM" && <div className={"small pstate " + pOf(cur.other_id).state}><Dot active={pOf(cur.other_id).active} /> {pOf(cur.other_id).label}</div>}
@@ -210,7 +213,7 @@ export default function Chat() {
       {modal === "dm" && (
         <Modal title="Message a colleague" onClose={() => setModal("")}>
           {others.length === 0 && <div className="empty">No other users yet.</div>}
-          {others.map((u) => { const pr = presenceOf(presence[u.id], now); return <div key={u.id} className="chat-item" onClick={() => startDm(u.id)}><span className="pwrap"><Avatar name={u.name} /><Dot active={pr.active} /></span><div className="grow"><b>{u.name}</b><div className={"small pstate " + pr.state}>{pr.label}</div></div><span className="badge">{u.role}</span></div>; })}
+          {others.map((u) => { const pr = presenceOf(presence[u.id], now); return <div key={u.id} className="chat-item" onClick={() => startDm(u.id)}><span className="pwrap"><Avatar name={u.name} /><Dot active={pr.active} /></span><div className="grow"><b>{u.name}</b><div className={"small pstate " + pr.state}>{pr.label}</div></div><span className="badge">{roleLabel(u.role)}</span></div>; })}
         </Modal>
       )}
       {modal === "channel" && (

@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api, compressImage, fmtDateTime } from "../api";
-import { Footer } from "../ui";
+import { Footer, LogoTD } from "../ui";
 
 function UploadRow({ request, onDone }: { request?: any; onDone: () => void }) {
   const ref = useRef<HTMLInputElement>(null);
@@ -96,7 +96,7 @@ export default function Portal() {
   const Head = (
     <div className="portal-head">
       <div className="row" style={{ maxWidth: 720, margin: "0 auto" }}>
-        <div className="logo-chip"><img src="/logo-taxdoctor.svg" alt="The Tax Doctor" /></div>
+        <div className="logo-chip"><LogoTD h={30} /></div>
         <span className="muted small right">Secure document portal</span>
         {state === "in" && <button className="btn sm" style={{ background: "#1a1a1d", color: "#ddd", borderColor: "#333" }} onClick={() => api("/portal/logout", { method: "POST" }).then(() => { setMe(null); setState("login"); })}>Sign out</button>}
       </div>

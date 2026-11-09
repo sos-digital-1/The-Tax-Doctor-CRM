@@ -10,7 +10,7 @@
   html, body { margin: 0; min-height: 100%; background: #0b0b0d; color: #fff; font: 15px/1.5 system-ui, "Segoe UI", Roboto, sans-serif; }
   body { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 28px 22px; }
   .chip { background: #fff; border-radius: 14px; padding: 12px 22px; margin-bottom: 26px; }
-  .chip img { height: 40px; display: block; }
+  .chip .td { display: block; height: 40px; aspect-ratio: 1320 / 431; background: url(brand/the-tax-doctor.jpg) 51.03% 33.94% / 151.52% auto no-repeat; }
   h1 { font-size: 24px; margin: 0 0 6px; letter-spacing: -0.02em; text-align: center; }
   p { color: #a3a7b3; margin: 0 0 18px; text-align: center; max-width: 340px; }
   input { width: 100%; max-width: 360px; padding: 14px 16px; border-radius: 12px; border: 1px solid #35373d; background: #17181b; color: #fff; font: inherit; }
@@ -24,14 +24,14 @@
 </style>
 </head>
 <body>
-  <div class="chip"><img src="taxdoctor.png" alt="The Tax Doctor" /></div>
+  <div class="chip"><span class="td" role="img" aria-label="The Tax Doctor"></span></div>
   <h1 id="title">Connect to your firm</h1>
   <p id="sub">Enter the portal address your firm uses. You only do this once on this phone.</p>
   <input id="url" inputmode="url" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="https://portal.yourfirm.in" />
   <button id="go">Connect</button>
   <div class="err" id="err"></div>
   <div class="small" id="hint">Staff and admin app. Customers do not need it - they only use the link you send them.</div>
-  <div class="eng"><span>Built by</span><img src="smack.png" alt="Smack Online Services OPC Pvt Ltd" /></div>
+  <div class="eng"><span>Built by</span><img src="brand/smack-online-services.webp" alt="Smack Online Services OPC Pvt Ltd" /></div>
 <script>
   const KEY = "td-server";
   const $ = (id) => document.getElementById(id);

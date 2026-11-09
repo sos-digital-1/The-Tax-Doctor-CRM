@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
-import { Engineered, PasswordInput, passwordOk } from "../ui";
+import { Engineered, LogoTD, PasswordInput, passwordOk } from "../ui";
 
 /** Opened from the emailed link: /reset?token=... */
 export default function Reset() {
@@ -26,7 +26,7 @@ export default function Reset() {
     <div className="auth" style={{ gridTemplateColumns: "1fr" }}>
       <div className="auth-form" style={{ background: "var(--bg)" }}>
         <div className="auth-card stack card card-b" style={{ maxWidth: 440, padding: 28 }}>
-          <div className="logo-chip" style={{ alignSelf: "flex-start", border: "1px solid var(--border)" }}><img src="/logo-taxdoctor.svg" alt="The Tax Doctor" /></div>
+          <div className="logo-chip" style={{ alignSelf: "flex-start", border: "1px solid var(--border)" }}><LogoTD h={34} /></div>
           {done ? (
             <>
               <h1 style={{ fontSize: 24 }}>Password updated</h1>
