@@ -212,3 +212,23 @@ button, .btn, a, .nlink, .chat-item { touch-action: manipulation; }
   .chat-back { display: inline-flex; }
   .msg { max-width: 92%; }
 }
+
+/* ===== Messenger-style chat popup (top bar) ===== */
+.cpop { position: absolute; top: 46px; right: -60px; width: 380px; max-width: calc(100vw - 20px); height: min(620px, calc(100dvh - 90px)); background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow-lg); display: flex; flex-direction: column; overflow: hidden; z-index: 90; }
+.cpop-h { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.cpop-h h3 { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; }
+.cpop-s { display: flex; align-items: center; gap: 8px; margin: 10px 14px 4px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 7px 14px; color: var(--muted); }
+.cpop-s input { border: 0; background: none; outline: 0; flex: 1; font-size: 14px; color: var(--text); min-width: 0; }
+.cpop-t { display: flex; gap: 6px; padding: 8px 14px; }
+.cpop-t button { border: 0; background: none; border-radius: 999px; padding: 6px 14px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.cpop-t button.on { background: var(--red-soft); color: var(--red); }
+.cpop-l { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 6px; }
+.cpop-i { display: flex; align-items: center; gap: 12px; width: 100%; background: none; border: 0; padding: 9px 10px; border-radius: 12px; cursor: pointer; color: var(--text); }
+.cpop-i:hover { background: var(--surface-2); }
+.cpop-f { border: 0; border-top: 1px solid var(--border); background: none; padding: 12px; font-weight: 700; color: var(--red); cursor: pointer; }
+.cpop-m { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.cpop-m .msg { max-width: 85%; }
+.cpop-c { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); }
+@media (max-width: 960px) {
+  .cpop { position: fixed; top: 58px; left: 8px; right: 8px; width: auto; max-width: none; height: calc(100dvh - 70px); }
+}

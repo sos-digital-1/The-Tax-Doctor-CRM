@@ -13,6 +13,9 @@ function EnrolModal({ customerId, onClose, onSaved }: { customerId: number; onCl
   const [f, setF] = useState<any>({ service_id: "", next_due: "", due_day: "", assigned_to: "", fee: "", reg_no: "", notes: "" });
   const set = (k: string, v: string) => setF((p: any) => ({ ...p, [k]: v }));
   const svc = list.find((s) => String(s.id) === f.service_id);
+  // GSTR-1 / GSTR-3B come as Monthly or Quarterly: one dropdown switches between the two
+  const gst = svc ? /^(GSTR-1|GSTR-3B) \((Monthly|Quarterly)\)$/.exec(svc.name) : null;
+  const pickGstFreq = (freq: string) => { const sib = list.find((s) => s.name === `${gst![1]} (${freq})`); if (sib) set("service_id", String(sib.id)); };
   const save = async () => {
     try {
       await api(`/customers/${customerId}/services`, { body: f });
@@ -29,10 +32,23 @@ function EnrolModal({ customerId, onClose, onSaved }: { customerId: number; onCl
         <Field label="Service" full>
           <select className="input" value={f.service_id} onChange={(e) => set("service_id", e.target.value)}>
             <option value="">Select...</option>
-            <optgroup label="Recurring">{list.filter((s) => s.category === "RECURRING").map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</optgroup>
+            <optgroup label="Recurring (GST, TDS, PF, ESI...)">{list.filter((s) => s.category === "RECURRING").map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</optgroup>
             <optgroup label="Annual">{list.filter((s) => s.category === "ANNUAL").map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</optgroup>
           </select>
         </Field>
+        {gst && (
+          <Field label={`${gst[1]} filing frequency`} full>
+            <select className="input" value={gst[2]} onChange={(e) => pickGstFreq(e.target.value)}>
+              <option value="Monthly">Monthly - every month</option>
+              <option value="Quarterly">Quarterly (QRMP) - every quarter</option>
+            </select>
+            <div className="small muted" style={{ marginTop: 4 }}>
+              {gst[2] === "Monthly"
+                ? `${gst[1]} for each month is due on the ${gst[1] === "GSTR-1" ? "11th" : "20th"} of the next month. A ticket is created for it automatically and assigned to the person below.`
+                : `Jan-Mar is filed by ${gst[1] === "GSTR-1" ? "11" : "20"} April, Apr-Jun by ${gst[1] === "GSTR-1" ? "11" : "20"} July, Jul-Sep by ${gst[1] === "GSTR-1" ? "11" : "20"} October, Oct-Dec by ${gst[1] === "GSTR-1" ? "11" : "20"} January. A ticket is created automatically for each quarter and assigned to the person below.`}
+            </div>
+          </Field>
+        )}
         {svc?.category === "ANNUAL" && (
           <>
             <Field label="Next due / expiry date *"><input type="date" className="input" value={f.next_due} onChange={(e) => set("next_due", e.target.value)} /></Field>

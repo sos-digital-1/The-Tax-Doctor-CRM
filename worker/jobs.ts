@@ -27,6 +27,10 @@ export async function generateRecurring(env: Env, period: string, userId: number
     let label: string;
     if (cs.frequency === "QUARTERLY" && /TDS Return/i.test(cs.service_name)) {
       label = `${QUARTER_MONTHS[m]} FY ${m >= 4 ? y : y - 1}`;
+    } else if (cs.frequency === "QUARTERLY" && /GSTR/i.test(cs.service_name)) {
+      // filed in Apr / Jul / Oct / Jan for the quarter that just ended
+      const q = m === 1 ? [10, 12, y - 1] : m === 4 ? [1, 3, y] : m === 7 ? [4, 6, y] : [7, 9, y];
+      label = `${MONTHS[q[0] - 1].slice(0, 3)}-${MONTHS[q[1] - 1].slice(0, 3)} ${q[2]} quarter`;
     } else if (cs.frequency === "QUARTERLY") {
       label = `${MONTHS[m - 1]} ${y} instalment`;
     } else {

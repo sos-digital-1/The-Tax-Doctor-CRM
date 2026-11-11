@@ -260,20 +260,59 @@ function Users() {
   );
 }
 
+function ServiceForm({ initial, onClose, onSaved }: { initial?: any; onClose: () => void; onSaved: () => void }) {
+  const { toast } = useApp();
+  const edit = !!initial?.id;
+  const [f, setF] = useState<any>({ name: "", category: "RECURRING", frequency: "MONTHLY", due_day: "", months: "", renew_rule: "ACTUAL", renew_months: 12, description: "", ...initial });
+  const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
+  const rec = f.category === "RECURRING";
+  const save = async () => {
+    const body: any = { name: f.name, description: f.description, due_day: f.due_day === "" || f.due_day == null ? null : Number(f.due_day) };
+    if (rec) { body.frequency = f.frequency; body.months = f.frequency === "QUARTERLY" ? (f.months || "4,7,10,1") : f.frequency === "HALF_YEARLY" ? (f.months || "4,10") : null; }
+    if (f.category === "ANNUAL") { body.renew_rule = f.renew_rule; body.renew_months = Number(f.renew_months) || 12; }
+    try {
+      if (edit) await api(`/services/${initial.id}`, { method: "PATCH", body });
+      else await api("/services", { body: { ...body, category: f.category, frequency: f.category === "ONE_TIME" ? "ONCE" : f.category === "ANNUAL" ? "YEARLY" : f.frequency } });
+      toast(edit ? "Service updated" : "Service added");
+      window.dispatchEvent(new Event("td-services"));
+      onSaved();
+      onClose();
+    } catch (e: any) { toast(e.message, true); }
+  };
+  return (
+    <Modal title={edit ? `Edit ${initial.name}` : "Add service"} onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={!f.name.trim()} onClick={save}>{edit ? "Save changes" : "Add"}</button></>}>
+      <div className="form-grid">
+        <Field label="Name" full><input className="input" value={f.name} onChange={(e) => set("name", e.target.value)} /></Field>
+        <Field label="Type"><select className="input" value={f.category} disabled={edit} onChange={(e) => set("category", e.target.value)}><option value="RECURRING">Recurring (every month / quarter)</option><option value="ANNUAL">Annual (renewals)</option><option value="ONE_TIME">One-time</option></select></Field>
+        {rec && <Field label="Repeats"><select className="input" value={f.frequency} onChange={(e) => set("frequency", e.target.value)}><option value="MONTHLY">Every month</option><option value="QUARTERLY">Every quarter</option><option value="HALF_YEARLY">Every 6 months</option></select></Field>}
+        {rec && <Field label="Due day of month (0 = month end)"><input type="number" min={0} max={31} className="input" value={f.due_day ?? ""} onChange={(e) => set("due_day", e.target.value)} /></Field>}
+        {rec && f.frequency !== "MONTHLY" && <Field label="Months it is filed in (numbers)"><input className="input" value={f.months ?? ""} placeholder={f.frequency === "QUARTERLY" ? "4,7,10,1" : "4,10"} onChange={(e) => set("months", e.target.value)} /></Field>}
+        {f.category === "ANNUAL" && <Field label="Renewal rule"><select className="input" value={f.renew_rule ?? "ACTUAL"} onChange={(e) => set("renew_rule", e.target.value)}><option value="ACTUAL">On the actual date next year</option><option value="MAR31">By 31 March</option></select></Field>}
+        {f.category === "ANNUAL" && <Field label="Valid for (months) - the tenure"><input type="number" min={1} className="input" value={f.renew_months ?? 12} onChange={(e) => set("renew_months", e.target.value)} /></Field>}
+        <Field label="Description" full><input className="input" value={f.description ?? ""} onChange={(e) => set("description", e.target.value)} /></Field>
+      </div>
+      {edit && rec && <div className="small muted" style={{ marginTop: 10 }}>Changes apply to tickets created from now on. Tickets that already exist are not changed.</div>}
+    </Modal>
+  );
+}
+
 function Catalogue() {
   const { toast } = useApp();
   const { data, reload } = useLoad(() => api<any[]>("/services"), []);
-  const [adding, setAdding] = useState(false);
-  const [f, setF] = useState<any>({ name: "", category: "ONE_TIME", frequency: "ONCE", due_day: "", renew_rule: "ACTUAL", renew_months: 12 });
-  const create = async () => {
-    try { await api("/services", { body: f }); toast("Service added"); setAdding(false); reload(); } catch (e: any) { toast(e.message, true); }
+  const [form, setForm] = useState<any>(null); // {} = new, service = edit
+  const sync = () => { reload(); window.dispatchEvent(new Event("td-services")); };
+  const toggle = async (s: any) => { await api(`/services/${s.id}`, { method: "PATCH", body: { active: !s.active } }); sync(); };
+  const remove = async (s: any) => {
+    if (!window.confirm(`Delete "${s.name}"?\n\nIf customers or tickets already use it, it is archived instead (hidden from new work, nothing is lost).`)) return;
+    try { const r = await api(`/services/${s.id}`, { method: "DELETE" }); toast(r.archived ? `${s.name} is in use, so it was archived (history kept)` : `${s.name} deleted`); sync(); } catch (e: any) { toast(e.message, true); }
   };
-  const toggle = async (s: any) => { await api(`/services/${s.id}`, { method: "PATCH", body: { ...s, active: !s.active } }); reload(); };
-  const setDay = async (s: any, v: string) => { await api(`/services/${s.id}`, { method: "PATCH", body: { ...s, due_day: v === "" ? null : Number(v) } }); toast("Default due day updated for future tickets"); reload(); };
+  const tenure = (s: any) => s.category === "RECURRING"
+    ? `${{ MONTHLY: "Every month", QUARTERLY: "Every quarter", HALF_YEARLY: "Every 6 months" }[s.frequency as string] || s.frequency.toLowerCase()}${s.due_day != null ? (s.due_day === 0 ? " · due month end" : ` · due ${s.due_day}th`) : ""}`
+    : s.category === "ANNUAL" ? `Valid ${s.renew_months || 12} months${s.renew_rule === "MAR31" ? " · by 31 March" : ""}` : "One time";
   return (
     <>
-      <PageHead title="Service catalogue" sub="The list of services your firm offers. Add new ones any time - for example a new licence type.">
-        <button className="btn primary" onClick={() => setAdding(true)}>+ Add service</button>
+      <PageHead title="Service catalogue" sub="The list of services your firm offers. Add, edit, change how often a service repeats, or delete it.">
+        <button className="btn primary" onClick={() => setForm({})}>+ Add service</button>
       </PageHead>
       {["RECURRING", "ANNUAL", "ONE_TIME"].map((cat) => (
         <div className="card" key={cat} style={{ marginBottom: 14 }}>
@@ -281,27 +320,15 @@ function Catalogue() {
           <div className="table-wrap"><table><tbody>
             {(data || []).filter((s) => s.category === cat).map((s) => (
               <tr key={s.id} style={{ opacity: s.active ? 1 : 0.5 }}>
-                <td><b>{s.name}</b><div className="small muted">{s.description}</div></td>
-                <td><span className="badge">{s.frequency.toLowerCase()}</span>{s.renew_rule === "MAR31" && <span className="badge red" style={{ marginLeft: 6 }}>by 31 March</span>}</td>
-                <td>{cat === "RECURRING" ? <span className="row small">Due day <input className="input" style={{ width: 64, padding: "3px 6px" }} type="number" min={0} max={31} defaultValue={s.due_day ?? ""} onBlur={(e) => e.target.value !== String(s.due_day ?? "") && setDay(s, e.target.value)} /></span> : null}</td>
-                <td className="right"><button className="btn sm" onClick={() => toggle(s)}>{s.active ? "Disable" : "Enable"}</button></td>
+                <td><b>{s.name}</b>{!s.active && <span className="badge" style={{ marginLeft: 6 }}>archived</span>}<div className="small muted">{s.description}</div></td>
+                <td><span className="badge">{tenure(s)}</span></td>
+                <td className="right" style={{ whiteSpace: "nowrap" }}><button className="btn sm" onClick={() => setForm(s)}>Edit</button> <button className="btn sm" onClick={() => toggle(s)}>{s.active ? "Disable" : "Enable"}</button> <button className="btn sm danger" onClick={() => remove(s)}>Delete</button></td>
               </tr>
             ))}
           </tbody></table></div>
         </div>
       ))}
-      {adding && (
-        <Modal title="Add service" onClose={() => setAdding(false)} footer={<><button className="btn" onClick={() => setAdding(false)}>Cancel</button><button className="btn primary" disabled={!f.name} onClick={create}>Add</button></>}>
-          <div className="form-grid">
-            <Field label="Name" full><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
-            <Field label="Category"><select className="input" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value, frequency: e.target.value === "ONE_TIME" ? "ONCE" : e.target.value === "RECURRING" ? "MONTHLY" : "YEARLY" })}><option value="ONE_TIME">One-time</option><option value="ANNUAL">Annual</option><option value="RECURRING">Recurring</option></select></Field>
-            {f.category === "RECURRING" && <Field label="Frequency"><select className="input" value={f.frequency} onChange={(e) => setF({ ...f, frequency: e.target.value })}><option value="MONTHLY">Monthly</option></select></Field>}
-            {f.category === "RECURRING" && <Field label="Due day of month (0 = month end)"><input type="number" className="input" value={f.due_day} onChange={(e) => setF({ ...f, due_day: e.target.value })} /></Field>}
-            {f.category === "ANNUAL" && <Field label="Renewal rule"><select className="input" value={f.renew_rule} onChange={(e) => setF({ ...f, renew_rule: e.target.value })}><option value="ACTUAL">On actual date next year</option><option value="MAR31">By 31 March</option></select></Field>}
-            {f.category === "ANNUAL" && <Field label="Valid for (months)"><input type="number" className="input" value={f.renew_months} onChange={(e) => setF({ ...f, renew_months: e.target.value })} /></Field>}
-          </div>
-        </Modal>
-      )}
+      {form && <ServiceForm initial={form.id ? form : undefined} onClose={() => setForm(null)} onSaved={reload} />}
     </>
   );
 }

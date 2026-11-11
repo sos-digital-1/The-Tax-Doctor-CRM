@@ -7,6 +7,7 @@ import { api, fmtDateTime, roleLabel, User } from "./api";
 import { Avatar, Ctx, Engineered, Icon, LogoTD, Meta, clearCache } from "./ui";
 import { ChangePasswordModal, ForcePassword } from "./components/Password";
 import ProfileModal from "./components/Profile";
+import ChatPopup from "./components/ChatPopup";
 import Login from "./pages/Login";
 import Palette from "./components/Palette";
 
@@ -109,7 +110,10 @@ function Shell({ user, onLogout, onRefresh }: { user: User & { perms: string[] }
 
   useEffect(() => {
     api("/users").then(setUsers).catch(() => {});
-    api("/services").then(setServices).catch(() => {});
+    const loadServices = () => api("/services").then(setServices).catch(() => {});
+    loadServices();
+    window.addEventListener("td-services", loadServices); // the catalogue page announces its edits
+    return () => window.removeEventListener("td-services", loadServices);
   }, []);
   useEffect(() => { refreshBadges(); setMenu(""); }, [loc.pathname, refreshBadges]);
   useEffect(() => { if (menu === "notif") api("/notifications").then((r) => setNotifs(r.items)).catch(() => {}); }, [menu]);
@@ -270,6 +274,7 @@ function Shell({ user, onLogout, onRefresh }: { user: User & { perms: string[] }
                 </div>
               )}
             </div>
+            {can("chat.use") && <ChatPopup />}
             <button className="tbtn" title="Light / dark" onClick={toggleTheme}><Icon name={document.documentElement.dataset.theme === "dark" ? "sun" : "moon"} /></button>
             <div style={{ position: "relative" }}>
               <button className="tbtn" title="Notifications" onClick={() => setMenu(menu === "notif" ? "" : "notif")}><Icon name="bell" />{badges.notif > 0 && <span className="dot">{badges.notif}</span>}</button>

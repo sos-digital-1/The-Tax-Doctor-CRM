@@ -52,8 +52,45 @@ api.post("/services", need("catalogue.manage"), async (c) => {
 api.patch("/services/:id", need("catalogue.manage"), async (c) => {
   const b = await c.req.json();
   const id = Number(c.req.param("id"));
-  await run(c.env.DB, "UPDATE services SET name = COALESCE(?, name), due_day = ?, description = ?, active = COALESCE(?, active) WHERE id = ?", nul(b.name), num(b.due_day), nul(b.description), typeof b.active === "boolean" ? (b.active ? 1 : 0) : null, id);
+  const cur = await one<any>(c.env.DB, "SELECT * FROM services WHERE id = ?", id);
+  if (!cur) return c.json({ error: "Not found" }, 404);
+  const has_ = (k: string) => k in b;
+  try {
+    await run(
+      c.env.DB,
+      "UPDATE services SET name = ?, frequency = ?, due_day = ?, months = ?, period_offset = ?, renew_rule = ?, renew_months = ?, description = ?, active = ? WHERE id = ?",
+      str(b.name) || cur.name,
+      has_("frequency") && str(b.frequency) ? str(b.frequency) : cur.frequency,
+      has_("due_day") ? num(b.due_day) : cur.due_day,
+      has_("months") ? nul(b.months) : cur.months,
+      has_("period_offset") ? (num(b.period_offset) ?? 1) : cur.period_offset,
+      has_("renew_rule") ? nul(b.renew_rule) : cur.renew_rule,
+      has_("renew_months") ? num(b.renew_months) : cur.renew_months,
+      has_("description") ? nul(b.description) : cur.description,
+      typeof b.active === "boolean" ? (b.active ? 1 : 0) : cur.active,
+      id
+    );
+  } catch {
+    return c.json({ error: "Another service already has this name" }, 409);
+  }
+  await logActivity(c.env.DB, c.get("user"), "service.update", "service", id, cur.name);
   return c.json({ ok: true });
+});
+
+// Delete a service. One that was never used is removed; one with customers or tickets is archived instead so no history is lost.
+api.delete("/services/:id", need("catalogue.manage"), async (c) => {
+  const id = Number(c.req.param("id"));
+  const s = await one<any>(c.env.DB, "SELECT id, name FROM services WHERE id = ?", id);
+  if (!s) return c.json({ error: "Not found" }, 404);
+  const used = (await one<{ n: number }>(c.env.DB, "SELECT (SELECT COUNT(*) FROM customer_services WHERE service_id = ?1) + (SELECT COUNT(*) FROM tasks WHERE service_id = ?1) AS n", id))!.n;
+  if (used > 0) {
+    await run(c.env.DB, "UPDATE services SET active = 0 WHERE id = ?", id);
+    await logActivity(c.env.DB, c.get("user"), "service.archive", "service", id, s.name);
+    return c.json({ ok: true, archived: true, used });
+  }
+  await run(c.env.DB, "DELETE FROM services WHERE id = ?", id);
+  await logActivity(c.env.DB, c.get("user"), "service.delete", "service", id, s.name);
+  return c.json({ ok: true, archived: false });
 });
 
 // ---------------------------------------------------------------- customers

@@ -47,8 +47,10 @@ const services = [
   ["Shops & Establishment Renewal", "ANNUAL", "YEARLY", null, 1, "MAR31", 12, "Shops and establishment licence renewal."],
   ["GST LUT Renewal", "ANNUAL", "YEARLY", null, 1, "MAR31", 12, "Letter of undertaking for exporters - before 31 March."],
 
-  ["GSTR-1", "RECURRING", "MONTHLY", 11, 1, null, null, "Outward supplies return - due 11th. QRMP customers: set due day 13 on their enrolment."],
-  ["GSTR-3B", "RECURRING", "MONTHLY", 20, 1, null, null, "Summary return and tax payment - due 20th. QRMP customers: set due day 22 or 24."],
+  ["GSTR-1 (Monthly)", "RECURRING", "MONTHLY", 11, 1, null, null, "Outward supplies return, every month - due 11th of the next month."],
+  ["GSTR-1 (Quarterly)", "RECURRING", "QUARTERLY", 11, 1, null, null, "Outward supplies return, every quarter - due 11th of April, July, October and January.", "4,7,10,1"],
+  ["GSTR-3B (Monthly)", "RECURRING", "MONTHLY", 20, 1, null, null, "Summary return and tax payment, every month - due 20th of the next month."],
+  ["GSTR-3B (Quarterly)", "RECURRING", "QUARTERLY", 20, 1, null, null, "Summary return and tax payment, every quarter - due 20th of April, July, October and January.", "4,7,10,1"],
   ["TDS Return", "RECURRING", "QUARTERLY", 31, 1, null, null, "Quarterly TDS return (24Q/26Q) - Jul, Oct, Jan, May.", "5,7,10,1"],
   ["Advance Tax", "RECURRING", "QUARTERLY", 15, 0, null, null, "Advance tax instalments - 15 Jun, Sep, Dec, Mar.", "6,9,12,3"],
   ["TDS Challan", "RECURRING", "MONTHLY", 7, 1, null, null, "Monthly TDS deposit."],
@@ -115,7 +117,7 @@ if (demo) {
     sql += `INSERT INTO customer_services (customer_id, service_id, next_due, reg_no, fee) VALUES (${cust}, ${svc(name)}, ${q(extra.due ?? null)}, ${q(extra.reg ?? null)}, ${extra.fee ?? "NULL"});\n`;
   };
   // recurring enrolments
-  for (const [cust, names] of [[1, ["GSTR-1", "GSTR-3B", "TDS Challan"]], [2, ["GSTR-1", "GSTR-3B", "TDS Challan", "TDS Return", "PF Return", "ESI Return", "P.Tax Registration Challan"]], [3, ["GSTR-1", "GSTR-3B", "TDS Return"]], [4, ["GSTR-1", "GSTR-3B"]], [5, ["GSTR-1", "GSTR-3B", "PF Return", "ESI Return"]], [6, ["GSTR-1", "GSTR-3B"]]]) {
+  for (const [cust, names] of [[1, ["GSTR-1 (Monthly)", "GSTR-3B (Monthly)", "TDS Challan"]], [2, ["GSTR-1 (Monthly)", "GSTR-3B (Monthly)", "TDS Challan", "TDS Return", "PF Return", "ESI Return", "P.Tax Registration Challan"]], [3, ["GSTR-1 (Quarterly)", "GSTR-3B (Quarterly)", "TDS Return"]], [4, ["GSTR-1 (Monthly)", "GSTR-3B (Monthly)"]], [5, ["GSTR-1 (Monthly)", "GSTR-3B (Monthly)", "PF Return", "ESI Return"]], [6, ["GSTR-1 (Quarterly)", "GSTR-3B (Quarterly)"]]]) {
     for (const n of names) enrol(cust, n, { fee: 800 });
   }
   // annual enrolments, several inside the 15-day window
